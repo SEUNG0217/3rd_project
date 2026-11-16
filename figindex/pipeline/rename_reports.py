@@ -240,8 +240,8 @@ def analyze(pdf_path: Path):
     date_str = pub_date.strftime("%Y%m%d") if pub_date else "00000000"
     new_name = f"RPT_{date_str}_{target}_{broker or '미확인'}.pdf"
     return {
-        "original_file_name": nfc(pdf_path.name),
-        "file_name": nfc(new_name),
+        "original_doc_name": nfc(pdf_path.name),
+        "doc_name": nfc(new_name),
         "target": target,
         "source_org": broker or "",
         "publish_date": pub_date.isoformat() if pub_date else "",
@@ -267,22 +267,22 @@ def main():
         try:
             row = analyze(p)
         except Exception as e:  # 깨진 PDF 등
-            row = {"original_file_name": nfc(p.name), "file_name": "", "target": "", "source_org": "",
+            row = {"original_doc_name": nfc(p.name), "doc_name": "", "target": "", "source_org": "",
                    "publish_date": "", "ticker": "", "flags": f"열기실패({e})"}
             row["_src"] = p
             rows.append(row)
             continue
         # 같은 이름이 또 나오면 _2, _3 붙이기
-        used[row["file_name"]] += 1
-        if used[row["file_name"]] > 1:
-            row["file_name"] = row["file_name"].replace(".pdf", f"_{used[row['file_name']]}.pdf")
+        used[row["doc_name"]] += 1
+        if used[row["doc_name"]] > 1:
+            row["doc_name"] = row["doc_name"].replace(".pdf", f"_{used[row['doc_name']]}.pdf")
         row["_src"] = p
         rows.append(row)
 
     # 화면 출력
     for r in rows:
         mark = "  [확인]" if r["flags"] else ""
-        print(f"{r['original_file_name']:<28} → {r['file_name']}{mark}")
+        print(f"{r['original_doc_name']:<28} → {r['doc_name']}{mark}")
         if r["flags"]:
             print(f"{'':<31}{r['flags']}")
 
@@ -293,7 +293,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     plan_path = out / "rename_plan.csv"
     with open(plan_path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=["original_file_name", "file_name", "target", "source_org",
+        w = csv.DictWriter(f, fieldnames=["original_doc_name", "doc_name", "target", "source_org",
                                           "publish_date", "ticker", "flags"])
         w.writeheader()
         w.writerows({k: v for k, v in r.items() if k != "_src"} for r in rows)
@@ -301,12 +301,12 @@ def main():
     meta_path = out / "metadata.csv"
     with open(meta_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["file_name", "doc_type", "target", "source_org", "publish_date",
-                    "source_url", "license_note", "original_file_name"])
+        w.writerow(["doc_name", "doc_type", "target", "source_org", "publish_date",
+                    "source_url", "license_note", "original_doc_name"])
         for r in rows:
-            if r["file_name"]:
-                w.writerow([r["file_name"], "REPORT", r["target"], r["source_org"], r["publish_date"],
-                            "", "", r["original_file_name"]])
+            if r["doc_name"]:
+                w.writerow([r["doc_name"], "REPORT", r["target"], r["source_org"], r["publish_date"],
+                            "", "", r["original_doc_name"]])
     print(f"대조표: {plan_path}\n메타데이터: {meta_path}")
 
     if not args.apply:
@@ -314,8 +314,8 @@ def main():
         return
 
     for r in rows:
-        if r["file_name"]:
-            shutil.copy2(r["_src"], out / r["file_name"])
+        if r["doc_name"]:
+            shutil.copy2(r["_src"], out / r["doc_name"])
     print(f"\n복사 완료 → {out} (원본은 그대로 있습니다)")
 
 

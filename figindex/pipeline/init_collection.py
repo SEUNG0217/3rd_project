@@ -9,12 +9,15 @@ from qdrant_client.http import models as qmodels
 load_dotenv()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
-QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "figindex_elements")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "figindex_elements_v2")
 CROPS_DIR = Path(os.getenv("CROPS_DIR", "/data/crops"))
 
 
 def clean_crops_directory():
     """Clear test crops in crops directory, preserving .gitkeep"""
+    # 실제 데이터 보존을 위해 CLEAN_CROPS 환경변수가 'true'일 때만 삭제 실행
+    if os.getenv("CLEAN_CROPS", "false").lower() != "true":
+        return
     if CROPS_DIR.exists():
         for item in CROPS_DIR.iterdir():
             if item.name == ".gitkeep":

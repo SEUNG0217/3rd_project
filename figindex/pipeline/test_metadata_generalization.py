@@ -337,10 +337,10 @@ def test_extractor_builds_generalized_schema_from_cache(tmp_path):
     img_hash = ext.get_image_hash(img_path)
     ext.cache[img_hash] = {
         "element_type": "CHART",
-        "title_or_caption": "[그림 1] 반도체 수출 추이",
+        "caption": "[그림 1] 반도체 수출 추이",
         "summary": "반도체 수출이 전년 대비 증가했습니다.",
-        "hashtags": ["#반도체수출동향", "#산업연구원", "#증권사"],
-        "structured_data": None,
+        "hashtags": ["반도체수출동향", "산업연구원", "증권사"],
+        "table_data": None,
     }
 
     crop_info = {
@@ -350,6 +350,8 @@ def test_extractor_builds_generalized_schema_from_cache(tmp_path):
         "relative_path": "/static/crops/sample_crop.png",
         "hint_type": "CHART",
     }
+
+    from shared.schemas import ElementSearchPayload
 
     # PUBLIC_REPORT 검증
     pub_meta = {
@@ -362,9 +364,20 @@ def test_extractor_builds_generalized_schema_from_cache(tmp_path):
         "analyst": None,
     }
     el = ext.analyze_crop(crop_info, "PUB_20261020_반도체수출동향_산업연구원.pdf", 3, pub_meta)
-    assert el.doc_type == "PUBLIC_REPORT"
-    assert el.source_org == "산업연구원"
-    assert el.domain is None
+    payload_pub = ElementSearchPayload(
+        **el.model_dump(),
+        doc_name="PUB_20261020_반도체수출동향_산업연구원.pdf",
+        doc_title=pub_meta["doc_title"],
+        doc_type=pub_meta["doc_type"],
+        domain=pub_meta["industry"],
+        source_org=pub_meta["source_org"],
+        authors=[pub_meta["analyst"]] if pub_meta.get("analyst") else [],
+        publish_date=pub_meta["publish_date"],
+    )
+    assert payload_pub.doc_type == "PUBLIC_REPORT"
+    assert payload_pub.source_org == "산업연구원"
+    assert payload_pub.domain is None
+    assert el.caption == "[그림 1] 반도체 수출 추이"
     assert el.extra_metadata["target"] == "반도체수출동향"
     assert el.extra_metadata["company"] is None
     assert el.extra_metadata["broker"] is None
@@ -386,9 +399,19 @@ def test_extractor_builds_generalized_schema_from_cache(tmp_path):
         "industry": None,
     }
     el_rpt = ext.analyze_crop(crop_info, "RPT_20261106_삼성전자_한투.pdf", 2, rpt_meta)
-    assert el_rpt.doc_type == "REPORT"
-    assert el_rpt.source_org == "한국투자증권"
-    assert el_rpt.domain == "금융/산업"
+    payload_rpt = ElementSearchPayload(
+        **el_rpt.model_dump(),
+        doc_name="RPT_20261106_삼성전자_한투.pdf",
+        doc_title=rpt_meta["doc_title"],
+        doc_type=rpt_meta["doc_type"],
+        domain="금융/산업",
+        source_org=rpt_meta["source_org"],
+        authors=[rpt_meta["analyst"]] if rpt_meta.get("analyst") else [],
+        publish_date=rpt_meta["publish_date"],
+    )
+    assert payload_rpt.doc_type == "REPORT"
+    assert payload_rpt.source_org == "한국투자증권"
+    assert payload_rpt.domain == "금융/산업"
     assert el_rpt.extra_metadata["target"] == "삼성전자"
     assert el_rpt.extra_metadata["company"] == "삼성전자"
     assert el_rpt.extra_metadata["broker"] == "한국투자증권"

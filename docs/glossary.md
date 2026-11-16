@@ -1,6 +1,6 @@
 # FigIndex 용어집
 
-> 이름의 원본은 `app/schemas.py`입니다. 이 문서와 schemas.py가 다르면 schemas.py가 맞고, 이 문서를 고칩니다.
+> 이름의 원본은 `figindex/shared/schemas.py`입니다. 이 문서와 schemas.py가 다르면 schemas.py가 맞고, 이 문서를 고칩니다.
 > 새 용어·필드가 필요하면 두 파일을 함께 고치는 PR을 올리고 팀장 승인을 받습니다.
 
 ## 1. 데이터 단위
@@ -114,13 +114,15 @@ DocLayout-YOLO의 클래스 이름은 모델 출력 그대로 씁니다. 1단계
 
 - `pipeline_version`: 프롬프트나 후처리 로직을 바꾸면 `PIPELINE_VERSION`을 올립니다. 재처리 대상은 이 값으로 고릅니다.
 - `model_name`: 추출 당시 환경변수 `VISION_MODEL` 값을 그대로 저장합니다.
-- 검색용 Qdrant payload(`ElementSearchPayload`)는 요소 + 문서 메타데이터를 합친 것입니다.
+- 검색용 Qdrant payload(`ElementSearchPayload`)는 요소 + 문서 메타데이터(`doc_name`, `doc_title`, `doc_type`, `domain`, `source_org`, `authors`, `publish_date`, `collection_id`)를 합친 것입니다.
+- **만드는 곳**: `doc_id` 발급과 문서 메타데이터 추출은 orchestrator가 문서마다 1회 합니다. extractor는 `Element`만 반환하고, orchestrator가 문서 메타데이터를 합쳐 `ElementSearchPayload`를 만듭니다.
+- PDF 텍스트 레이어는 `pipeline/pdf_text.py`의 함수로만 읽는다 (좌표 순서 정렬, 증권 리포트 글자 순서 꼬임 대응).
 
 ## 8. 좌표 (`bbox`)
 
 - 형식: **`[x0, y0, x1, y1]`**, 페이지 크기 대비 **0~1 정규화**, **좌상단 원점**
 - `Detection.bbox`는 병합·패딩 **전**, `Element.bbox`는 병합·패딩 **후** 박스입니다.
-- PyMuPDF(pt), YOLO(px), 화면(px)과의 변환은 **`app/coords.py`의 함수로만** 합니다. 페이지 크기는 `Page.width_pt`, `Page.height_pt`를 씁니다.
+- PyMuPDF(pt), YOLO(px), 화면(px)과의 변환은 **`figindex/shared/coords.py`의 함수로만** 합니다. 페이지 크기는 `Page.width_pt`, `Page.height_pt`를 씁니다.
 - 설계서 v0.4의 `[ymin, xmin, ymax, xmax]`에서 변경했습니다.
 
 ## 9. 표 수치 저장 규칙 (`TableData`)
@@ -134,6 +136,16 @@ DocLayout-YOLO의 클래스 이름은 모델 출력 그대로 씁니다. 1단계
 | `-`, `n/a`, 텍스트 | 원문 문자열 | 숫자로 못 읽으면 그대로 |
 
 `rows`의 키는 `columns` 값과 글자 하나까지 같아야 합니다.
+
+### 단위 규칙
+- **표 전체가 한 단위**: `unit`에만 기록합니다.
+- **행마다 단위가 다름**: `unit_by_row`(행 라벨 ➔ 단위)에 기록하고, 이때 `unit`은 비웁니다(`None`).
+- **열마다 단위가 다름**: `unit_by_column`(열 이름 ➔ 단위)에 기록하고, 이때 `unit`은 비웁니다(`None`).
+- **셀 단위 구하기**: 다른 코드에서 직접 단위를 판단하지 않고 반드시 `TableData.unit_for(row_label, column)` 메서드로만 구합니다 (`unit_by_row` ➔ `unit_by_column` ➔ `unit` 순 탐색).
+- **예시 (실적표)**:
+  - `unit_by_row = {"매출액": "십억원", "영업이익률": "%", "EPS": "원"}`
+  - `unit = None`
+  - 셀 단위 조회: `td.unit_for("매출액", "2025E")` ➔ `"십억원"`, `td.unit_for("EPS", "2025E")` ➔ `"원"`
 
 ## 10. 엔티티 사전 (`EntityEntry`)
 

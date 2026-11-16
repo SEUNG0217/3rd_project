@@ -2,36 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatSourceTarget } from "../lib/docTypeLabels";
-
-interface TableStructure {
-  columns: string[];
-  rows: Record<string, any>[];
-  unit?: string;
-  period_labels: string[];
-}
-
-interface VisualElement {
-  element_id: string;
-  doc_name: string;
-  page_number: number;
-  bbox: number[];
-  element_type: "TABLE" | "CHART" | "DIAGRAM";
-  image_path: string;
-  title_or_caption: string;
-  summary: string;
-  structured_data?: TableStructure;
-  hashtags: string[];
-  confidence_score: number;
-  review_status: string;
-  doc_title: string;
-  doc_type: string;
-  domain?: string;
-  source_org?: string;
-  authors: string[];
-  publish_date?: string;
-  entities: string[];
-  extra_metadata: Record<string, any>;
-}
+import { TableData, VisualElement } from "../lib/types";
 
 interface ReviewTabProps {
   backendUrl: string;
@@ -57,7 +28,7 @@ export default function ReviewTab({ backendUrl, onItemApproved }: ReviewTabProps
       string,
       {
         element_type: "TABLE" | "CHART" | "DIAGRAM";
-        title_or_caption: string;
+        caption: string;
         summary: string;
         raw_json_table: string;
       }
@@ -142,10 +113,10 @@ export default function ReviewTab({ backendUrl, onItemApproved }: ReviewTabProps
         data.forEach((elem) => {
           initialDrafts[elem.element_id] = {
             element_type: elem.element_type,
-            title_or_caption: elem.title_or_caption,
-            summary: elem.summary,
-            raw_json_table: elem.structured_data
-              ? JSON.stringify(elem.structured_data, null, 2)
+            caption: elem.caption || "",
+            summary: elem.summary || "",
+            raw_json_table: elem.table_data
+              ? JSON.stringify(elem.table_data, null, 2)
               : "",
           };
         });
@@ -173,10 +144,10 @@ export default function ReviewTab({ backendUrl, onItemApproved }: ReviewTabProps
     setFeedbackMsg(null);
     const draft = drafts[elementId];
 
-    let parsedStructuredData = null;
+    let parsedTableData = null;
     if (draft.raw_json_table && draft.raw_json_table.trim()) {
       try {
-        parsedStructuredData = JSON.parse(draft.raw_json_table);
+        parsedTableData = JSON.parse(draft.raw_json_table);
       } catch (err) {
         alert("표 데이터 JSON 형식이 올바르지 않습니다. 문법을 확인해 주세요.");
         setProcessingId(null);
@@ -186,11 +157,11 @@ export default function ReviewTab({ backendUrl, onItemApproved }: ReviewTabProps
 
     try {
       const payload = {
-        action: action,
+        review_action: action,
         element_type: draft.element_type,
-        title_or_caption: draft.title_or_caption,
+        caption: draft.caption,
         summary: draft.summary,
-        structured_data: parsedStructuredData,
+        table_data: parsedTableData,
       };
 
       const res = await fetch(`${backendUrl}/api/review/${elementId}`, {
@@ -348,8 +319,8 @@ export default function ReviewTab({ backendUrl, onItemApproved }: ReviewTabProps
           {elements.map((elem) => {
             const draft = drafts[elem.element_id] || {
               element_type: elem.element_type,
-              title_or_caption: elem.title_or_caption,
-              summary: elem.summary,
+              caption: elem.caption || "",
+              summary: elem.summary || "",
               raw_json_table: "",
             };
 
@@ -396,7 +367,7 @@ export default function ReviewTab({ backendUrl, onItemApproved }: ReviewTabProps
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={`${backendUrl}${elem.image_path}`}
-                        alt={elem.title_or_caption}
+                        alt={elem.caption || "도표 이미지"}
                         className="max-h-[340px] max-w-full object-contain rounded"
                       />
                     </div>
@@ -434,9 +405,9 @@ export default function ReviewTab({ backendUrl, onItemApproved }: ReviewTabProps
                       </label>
                       <input
                         type="text"
-                        value={draft.title_or_caption}
+                        value={draft.caption}
                         onChange={(e) =>
-                          handleFieldChange(elem.element_id, "title_or_caption", e.target.value)
+                          handleFieldChange(elem.element_id, "caption", e.target.value)
                         }
                         className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                       />
@@ -461,7 +432,7 @@ export default function ReviewTab({ backendUrl, onItemApproved }: ReviewTabProps
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-xs font-bold text-slate-700">
-                          표 수치 데이터 (structured_data JSON)
+                          표 수치 데이터 (table_data JSON)
                         </label>
                         <span className="text-[10px] text-slate-400">
                           columns 및 rows 수치 직접 수정 가능

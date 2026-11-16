@@ -2,36 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { formatSourceTarget, getElementSource } from "../lib/docTypeLabels";
-
-interface TableStructure {
-  columns: string[];
-  rows: Record<string, any>[];
-  unit?: string;
-  period_labels: string[];
-}
-
-interface VisualElement {
-  element_id: string;
-  doc_name: string;
-  page_number: number;
-  bbox: number[];
-  element_type: "TABLE" | "CHART" | "DIAGRAM";
-  image_path: string;
-  title_or_caption: string;
-  summary: string;
-  structured_data?: TableStructure;
-  hashtags: string[];
-  confidence_score: number;
-  review_status: string;
-  doc_title: string;
-  doc_type: string;
-  domain?: string;
-  source_org?: string;
-  authors: string[];
-  publish_date?: string;
-  entities: string[];
-  extra_metadata: Record<string, any>;
-}
+import { TableData, VisualElement } from "../lib/types";
+import { unitFor } from "../lib/tableUnits";
 
 interface ComparisonModalProps {
   isOpen: boolean;
@@ -62,8 +34,8 @@ export default function ComparisonModal({
   const [elemA, elemB] = elements;
 
   // Align table rows by matching group/indicator keys across both tables
-  const tableA = elemA.structured_data;
-  const tableB = elemB.structured_data;
+  const tableA = elemA.table_data;
+  const tableB = elemB.table_data;
 
   // Identify first column key for each table (usually the indicator name, e.g., '구분', '항목', '(십억원)')
   const colKeyA = tableA?.columns?.[0] || "";
@@ -138,7 +110,7 @@ export default function ComparisonModal({
               <div>
                 <div className="flex items-center justify-between mb-2 gap-2">
                   <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded border border-indigo-200 truncate">
-                    [도표 1] {formatSourceTarget(elemA) || elemA.title_or_caption}
+                    [도표 1] {formatSourceTarget(elemA) || elemA.caption}
                   </span>
                   <span className="text-xs text-slate-400 shrink-0">
                     {[getElementSource(elemA), elemA.publish_date].filter(Boolean).join(" | ")}
@@ -149,16 +121,16 @@ export default function ComparisonModal({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={`${backendUrl}${elemA.image_path}`}
-                    alt={elemA.title_or_caption}
+                    alt={elemA.caption || "도표 1 이미지"}
                     className="max-h-full max-w-full object-contain"
                   />
                 </div>
 
                 <h3 className="font-bold text-sm text-slate-900 mb-1 leading-snug">
-                  {elemA.title_or_caption}
+                  {elemA.caption || "제목 없음"}
                 </h3>
                 <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
-                  {elemA.summary}
+                  {elemA.summary || ""}
                 </p>
               </div>
             </div>
@@ -168,7 +140,7 @@ export default function ComparisonModal({
               <div>
                 <div className="flex items-center justify-between mb-2 gap-2">
                   <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded border border-purple-200 truncate">
-                    [도표 2] {formatSourceTarget(elemB) || elemB.title_or_caption}
+                    [도표 2] {formatSourceTarget(elemB) || elemB.caption}
                   </span>
                   <span className="text-xs text-slate-400 shrink-0">
                     {[getElementSource(elemB), elemB.publish_date].filter(Boolean).join(" | ")}
@@ -179,16 +151,16 @@ export default function ComparisonModal({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={`${backendUrl}${elemB.image_path}`}
-                    alt={elemB.title_or_caption}
+                    alt={elemB.caption || "도표 2 이미지"}
                     className="max-h-full max-w-full object-contain"
                   />
                 </div>
 
                 <h3 className="font-bold text-sm text-slate-900 mb-1 leading-snug">
-                  {elemB.title_or_caption}
+                  {elemB.caption || "제목 없음"}
                 </h3>
                 <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
-                  {elemB.summary}
+                  {elemB.summary || ""}
                 </p>
               </div>
             </div>
@@ -227,14 +199,14 @@ export default function ComparisonModal({
                           colSpan={Math.max(1, (tableA?.columns?.length || 1) - 1)}
                           className="p-2 text-center bg-indigo-50 text-indigo-800 border-r border-slate-200 font-bold"
                         >
-                          [도표 1] {formatSourceTarget(elemA) || elemA.title_or_caption.slice(0, 15)}
+                          [도표 1] {formatSourceTarget(elemA) || (elemA.caption || "").slice(0, 15)}
                         </th>
                         {/* Table B Header Columns */}
                         <th
                           colSpan={Math.max(1, (tableB?.columns?.length || 1) - 1)}
                           className="p-2 text-center bg-purple-50 text-purple-800 font-bold"
                         >
-                          [도표 2] {formatSourceTarget(elemB) || elemB.title_or_caption.slice(0, 15)}
+                          [도표 2] {formatSourceTarget(elemB) || (elemB.caption || "").slice(0, 15)}
                         </th>
                       </tr>
                       {/* Sub-header for column periods */}
@@ -276,29 +248,57 @@ export default function ComparisonModal({
                             </td>
 
                             {/* Table A Row Values */}
-                            {tableA?.columns?.slice(1).map((col, cIdx) => (
-                              <td
-                                key={`val-a-${cIdx}`}
-                                className="p-2 text-center font-mono text-slate-700 whitespace-nowrap"
-                              >
-                                {rowA ? rowA[col] ?? "-" : <span className="text-slate-300">-</span>}
-                              </td>
-                            ))}
+                            {tableA?.columns?.slice(1).map((col, cIdx) => {
+                              const unitA = unitFor(tableA, label, col);
+                              return (
+                                <td
+                                  key={`val-a-${cIdx}`}
+                                  className="p-2 text-center font-mono text-slate-700 whitespace-nowrap"
+                                >
+                                  {rowA ? (
+                                    <>
+                                      {rowA[col] ?? "-"}
+                                      {unitA && rowA[col] != null && (
+                                        <span className="ml-1 text-[10px] text-slate-400 font-normal">
+                                          {unitA}
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </td>
+                              );
+                            })}
                             {(!tableA || tableA.columns.length <= 1) && (
                               <td className="p-2 text-center text-slate-300">-</td>
                             )}
 
                             {/* Table B Row Values */}
-                            {tableB?.columns?.slice(1).map((col, cIdx) => (
-                              <td
-                                key={`val-b-${cIdx}`}
-                                className={`p-2 text-center font-mono text-slate-700 whitespace-nowrap ${
-                                  cIdx === 0 ? "border-l border-slate-100" : ""
-                                }`}
-                              >
-                                {rowB ? rowB[col] ?? "-" : <span className="text-slate-300">-</span>}
-                              </td>
-                            ))}
+                            {tableB?.columns?.slice(1).map((col, cIdx) => {
+                              const unitB = unitFor(tableB, label, col);
+                              return (
+                                <td
+                                  key={`val-b-${cIdx}`}
+                                  className={`p-2 text-center font-mono text-slate-700 whitespace-nowrap ${
+                                    cIdx === 0 ? "border-l border-slate-100" : ""
+                                  }`}
+                                >
+                                  {rowB ? (
+                                    <>
+                                      {rowB[col] ?? "-"}
+                                      {unitB && rowB[col] != null && (
+                                        <span className="ml-1 text-[10px] text-slate-400 font-normal">
+                                          {unitB}
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </td>
+                              );
+                            })}
                             {(!tableB || tableB.columns.length <= 1) && (
                               <td className="p-2 text-center text-slate-300">-</td>
                             )}

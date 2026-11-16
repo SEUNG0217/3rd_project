@@ -48,6 +48,7 @@ htmlcov/
 # ==============================================================================
 node_modules/
 .next/
+*.tsbuildinfo
 out/
 build/
 dist/
@@ -69,3 +70,6 @@ Thumbs.db
 *.swp
 *.swo
 *.log
+
+# Check state reports
+.check_reports/

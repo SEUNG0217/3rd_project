@@ -116,12 +116,12 @@ docker compose run --rm pipeline python run_index.py
 ## 7. 팀 협업 규칙
 
 1. **단일 진실 공급원 (Single Source of Truth)**:
-   - 모든 도표 데이터 규격은 **`shared/schemas.py`**의 `VisualElementSchema`를 유일한 기준으로 합니다.
+   - 모든 데이터 규격은 **`shared/schemas.py`**를 유일한 기준으로 합니다 (`Element`, `ElementSearchPayload`, `TableData` 등).
    - `backend`와 `pipeline` 모두 이 단일 스키마 파일만 참조합니다.
 2. **스키마 변경 절차**:
    - `shared/schemas.py` 필드 추가/변경은 구두 협의로 진행하지 않고, **GitHub PR(Pull Request) 리뷰를 통해서만 머지**합니다.
 3. **AI 코딩 도구 활용 시**:
-   - Cursor, Claude Code, Antigravity 등의 AI 도구에 프롬프트를 작성할 때는 반드시 **`shared/schemas.py`**와 **`docker-compose.yml`**을 컨텍스트로 함께 전달하세요.
+   - AI 도구 사용법은 루트의 `docs/onboarding.md`와 `docs/roles/`를 봅니다. 규칙 파일(`AGENTS.md`)은 Antigravity·Cursor가 자동으로 읽습니다.
 
 ---
 
