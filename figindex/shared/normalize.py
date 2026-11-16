@@ -178,7 +178,43 @@ def normalize_metric(label: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# 3. 금액 단위 환산 (원화만)
+# 3. 셀 값 → 숫자
+# ---------------------------------------------------------------------------
+# glossary 9절: 숫자는 숫자로 저장하는 게 규칙이지만, 추출 결과에 "5,470", "△1.2", "(3.0)", "4.0%"
+# 같은 문자열이 남아 있을 수 있다. 비교할 때만 읽고, 저장값은 바꾸지 않는다.
+_NUMBER = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
+_EMPTY_MARKS = {"", "-", "–", "—", "n/a", "na", "nm", "n.m.", "적지", "흑전", "적전", "적확", "흑지"}
+
+
+def parse_number(value: object) -> Optional[float]:
+    """셀 값을 숫자로 읽는다. 읽을 수 없으면 None.
+
+    >>> parse_number("5,470"), parse_number("△1.2"), parse_number("(3.0)"), parse_number("4.0%")
+    (5470.0, -1.2, -3.0, 4.0)
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace(",", "").replace(" ", "")
+    if text.lower() in _EMPTY_MARKS:
+        return None
+    negative = False
+    if text.startswith("△") or text.startswith("▽"):
+        negative, text = True, text[1:]
+    elif text.startswith("(") and text.endswith(")"):
+        negative, text = True, text[1:-1]
+    elif text.startswith("▲"):
+        text = text[1:]
+    text = text.rstrip("%")
+    if not _NUMBER.match(text):
+        return None
+    number = float(text)
+    return -abs(number) if negative else number
+
+
+# ---------------------------------------------------------------------------
+# 4. 금액 단위 환산 (원화만)
 # ---------------------------------------------------------------------------
 KRW_SCALE: Dict[str, float] = {
     "원": 1.0,
@@ -208,6 +244,7 @@ def convert_krw(value: object, from_unit: Optional[str], to_unit: str) -> Option
     dst = normalize_unit(to_unit)
     if src not in KRW_SCALE or dst not in KRW_SCALE:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    number = parse_number(value)
+    if number is None:
         return None
-    return float(value) * KRW_SCALE[src] / KRW_SCALE[dst]
+    return number * KRW_SCALE[src] / KRW_SCALE[dst]

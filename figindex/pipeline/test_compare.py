@@ -135,3 +135,19 @@ def test_available_metrics_counts_documents():
     assert metrics["매출액"] == 2
     assert metrics["영업이익률"] == 2
     assert "총매출액" not in metrics
+
+
+def test_string_numbers_are_read():
+    # 추출 결과에 문자열 숫자가 남아 있어도 비교할 수 있어야 한다
+    payload = _payload(
+        "fig-str", "doc-str", "하나증권", 2,
+        {
+            "columns": ["구분", "2025", "2026E", "2027E"],
+            "rows": [{"구분": "영업이익", "2025": "5,470", "2026E": "△120", "2027E": "-"}],
+            "unit": "억원",
+        },
+    )
+    result = build_comparison([payload], "롯데쇼핑", "영업이익")
+    values = {c.period_key: (c.raw_value, c.value) for c in result.cells}
+    assert values == {"2025": ("5,470", 5470.0), "2026": ("△120", -120.0)}
+    assert available_metrics([payload]) == {"영업이익": 1}

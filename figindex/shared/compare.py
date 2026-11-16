@@ -5,7 +5,7 @@
 Qdrant 조회는 백엔드가 하고, 이 모듈은 받은 payload(dict) 목록만 다룬다.
 
 규칙
-- TABLE 요소의 table_data만 본다. 숫자가 아닌 셀은 건너뛴다.
+- TABLE 요소의 table_data만 본다. 숫자로 읽을 수 없는 셀은 건너뛴다 ("5,470" 같은 문자열 숫자는 읽는다).
 - 행 라벨은 normalize_metric, 열 이름은 normalize_period로 해석한다.
 - 같은 문서·같은 기간 값이 여러 개면 앞 페이지 값을 쓴다 (요약 표가 보통 앞에 있음).
 - 원화 금액이면 가장 많이 쓰인 원화 단위(또는 지정 단위)로 환산한다. 원문 값은 raw_*에 남긴다.
@@ -22,12 +22,9 @@ from shared.normalize import (
     normalize_metric,
     normalize_period,
     normalize_unit,
+    parse_number,
 )
 from shared.schemas import ComparisonCell, ComparisonResult, ElementType, TableData
-
-
-def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _table_data(payload: Dict[str, Any]) -> Optional[TableData]:
@@ -66,7 +63,8 @@ def _collect_cells(payload: Dict[str, Any], metric_name: str) -> List[Comparison
             if period is None:
                 continue
             raw_value = row.get(column)
-            if not _is_number(raw_value):
+            number = parse_number(raw_value)
+            if number is None:
                 continue
             raw_unit = table.unit_for(str(label), column) or unit_hint
             cells.append(
@@ -84,7 +82,7 @@ def _collect_cells(payload: Dict[str, Any], metric_name: str) -> List[Comparison
                     raw_column=column,
                     raw_value=raw_value,
                     raw_unit=raw_unit,
-                    value=float(raw_value),
+                    value=number,
                     unit=normalize_unit(raw_unit),
                 )
             )
@@ -145,12 +143,13 @@ def available_metrics(payloads: Iterable[Dict[str, Any]]) -> Dict[str, int]:
         if table is None or not table.columns:
             continue
         first_column = table.columns[0]
-        has_period = any(normalize_period(c) for c in table.columns[1:])
-        if not has_period:
+        period_columns = [c for c in table.columns[1:] if normalize_period(c)]
+        if not period_columns:
             continue
         for row in table.rows:
             label = row.get(first_column)
             metric = normalize_metric(str(label)) if label is not None else None
-            if metric:
+            # build_comparison과 같은 기준: 기간 열에 숫자로 읽히는 값이 하나라도 있어야 센다
+            if metric and any(parse_number(row.get(c)) is not None for c in period_columns):
                 docs_by_metric.setdefault(metric, set()).add(payload.get("doc_id"))
     return {m: len(d) for m, d in sorted(docs_by_metric.items(), key=lambda kv: (-len(kv[1]), kv[0]))}

@@ -17,6 +17,7 @@ if str(FIGINDEX_DIR) not in sys.path:
 
 from shared.schemas import PeriodBasis  # noqa: E402
 from shared.normalize import (  # noqa: E402
+    parse_number,
     clean_row_label,
     convert_krw,
     normalize_metric,
@@ -177,4 +178,21 @@ def test_convert_krw_rejects_non_krw():
     assert convert_krw(4.0, "%", "억원") is None
     assert convert_krw(12.3, "배", "억원") is None
     assert convert_krw("n/a", "억원", "십억원") is None
+    assert convert_krw("-", "억원", "십억원") is None
     assert convert_krw(True, "억원", "십억원") is None
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (5470, 5470.0), (4.0, 4.0), ("5,470", 5470.0), ("137,383", 137383.0), ("△1.2", -1.2),
+        ("(3.0)", -3.0), ("-1.2", -1.2), ("4.0%", 4.0), ("▲5", 5.0), (" 12 ", 12.0),
+        ("-", None), ("n/a", None), ("적지", None), ("흑전", None), ("텍스트", None), (None, None), (True, None),
+    ],
+)
+def test_parse_number(raw, expected):
+    assert parse_number(raw) == expected
+
+
+def test_convert_krw_reads_string_numbers():
+    assert convert_krw("5,470", "억원", "십억원") == pytest.approx(547.0)
