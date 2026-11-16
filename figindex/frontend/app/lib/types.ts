@@ -59,3 +59,55 @@ export interface FilterOptions {
   element_types: string[];
 }
 
+
+// ── 문서 간 비교 (/api/compare) ─────────────────────────────
+// 백엔드 shared/schemas.py의 PeriodBasis·ComparisonCell·ComparisonResult와 같은 모양이다.
+
+export const PERIOD_BASIS = {
+  ACTUAL: "ACTUAL",
+  ESTIMATE: "ESTIMATE",
+  PRELIM: "PRELIM",
+} as const;
+export type PeriodBasis = (typeof PERIOD_BASIS)[keyof typeof PERIOD_BASIS];
+
+/** 기간 성격 화면 표기 (원문 접미사 A·E·P, docs/glossary.md 14절) */
+export const PERIOD_BASIS_LABELS: Record<PeriodBasis, string> = {
+  ACTUAL: "실적",
+  ESTIMATE: "추정",
+  PRELIM: "잠정",
+};
+
+export interface ComparisonCell {
+  element_id: string;
+  doc_id: string;
+  doc_name: string;
+  source_org?: string | null;
+  publish_date?: string | null;
+  page_number: number;
+  metric_name: string;
+  period_key: string;
+  period_basis?: PeriodBasis | null;
+  raw_row_label: string;
+  raw_column: string;
+  raw_value: string | number | null;
+  raw_unit?: string | null;
+  value?: number | null;
+  unit?: string | null;
+}
+
+export interface ComparisonResult {
+  target: string;
+  metric_name: string;
+  unit?: string | null;
+  period_keys: string[];
+  cells: ComparisonCell[];
+}
+
+/** GET /api/compare/metrics 응답: 지표명 → 그 지표를 가진 문서 수 */
+export interface CompareMetricsResponse {
+  target: string;
+  metrics: Record<string, number>;
+}
+
+/** /api/compare의 unit 쿼리에 넣을 수 있는 원화 단위 (shared/normalize.py KRW_SCALE) */
+export const COMPARE_KRW_UNITS = ["원", "천원", "백만원", "억원", "십억원", "조원"] as const;
