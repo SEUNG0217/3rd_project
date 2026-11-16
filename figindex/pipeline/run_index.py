@@ -45,10 +45,10 @@ def seed_cache_from_qdrant(orchestrator: ExtractionPipelineOrchestrator):
                 if img_hash not in orchestrator.extractor.cache:
                     cached_data = {
                         "element_type": payload.get("element_type", "TABLE"),
-                        "title_or_caption": payload.get("title_or_caption", ""),
+                        "caption": payload.get("caption", ""),
                         "summary": payload.get("summary", ""),
                         "hashtags": payload.get("hashtags", []),
-                        "structured_data": payload.get("structured_data")
+                        "table_data": payload.get("table_data")
                     }
                     orchestrator.extractor.cache[img_hash] = cached_data
                     seeded_count += 1
@@ -101,6 +101,7 @@ def main():
     parser.add_argument("--max-elements", type=int, default=4, help="Maximum visual elements to extract per PDF (default: 4)")
     parser.add_argument("--force", action="store_true", help="Force re-indexing even if document already exists")
     parser.add_argument("--dry-run", action="store_true", help="Calculate and print expected API calls without running indexing")
+    parser.add_argument("--file", type=str, default="", help="Process a specific single PDF filename")
     args = parser.parse_args()
 
     allowed_types: Optional[Set[str]] = None
@@ -122,6 +123,10 @@ def main():
 
     pdf_files = sorted(list(data_pdfs_dir.glob("*.pdf")))
     pdf_files = [p for p in pdf_files if not p.name.startswith("sample_")]
+
+    if args.file.strip():
+        target_name = args.file.strip()
+        pdf_files = [p for p in pdf_files if p.name == target_name or target_name in p.name]
 
     total_found = len(pdf_files)
     if allowed_types is not None:

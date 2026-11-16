@@ -19,6 +19,7 @@ from huggingface_hub import hf_hub_download
 from doclayout_yolo import YOLOv10
 
 from cropper import PDFCropper
+from shared.coords import norm_to_px
 
 
 def draw_old_candidates(pil_img: Image.Image, candidates) -> Image.Image:
@@ -28,8 +29,11 @@ def draw_old_candidates(pil_img: Image.Image, candidates) -> Image.Image:
     w, h = img.size
 
     for idx, cand in enumerate(candidates, start=1):
-        ymin, xmin, ymax, xmax = cand["bbox"]
-        x0, y0, x1, y1 = int(xmin * w), int(ymin * h), int(xmax * w), int(ymax * h)
+        raw_box = cand["bbox"]
+        # ymin, xmin, ymax, xmax -> coords.py 표준 [x0, y0, x1, y1]
+        std_norm_box = [raw_box[1], raw_box[0], raw_box[3], raw_box[2]]
+        px_coords = norm_to_px(std_norm_box, float(w), float(h))
+        x0, y0, x1, y1 = int(px_coords[0]), int(px_coords[1]), int(px_coords[2]), int(px_coords[3])
         hint_type = cand.get("hint_type", "ELEMENT")
         color = (37, 99, 235) if hint_type == "TABLE" else (147, 51, 234)  # TABLE: 파랑, CHART: 보라
 
@@ -136,7 +140,7 @@ def main():
                 for cls_name, cls_confs in sorted(confs_by_cls.items()):
                     avg_conf = sum(cls_confs) / len(cls_confs)
                     csv_rows.append({
-                        "file_name": pdf_path.name,
+                        "doc_name": pdf_path.name,
                         "page": page_num,
                         "detect_type": cls_name,
                         "count": len(cls_confs),
@@ -145,7 +149,7 @@ def main():
                     })
             else:
                 csv_rows.append({
-                    "file_name": pdf_path.name,
+                    "doc_name": pdf_path.name,
                     "page": page_num,
                     "detect_type": "none",
                     "count": 0,
@@ -171,7 +175,7 @@ def main():
     with open(summary_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["file_name", "page", "detect_type", "count", "confidence", "elapsed_sec"],
+            fieldnames=["doc_name", "page", "detect_type", "count", "confidence", "elapsed_sec"],
         )
         writer.writeheader()
         writer.writerows(csv_rows)

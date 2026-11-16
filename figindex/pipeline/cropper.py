@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 import fitz  # PyMuPDF
 from PIL import Image
+from shared.coords import px_to_norm
 
 
 class BBoxHelper:
@@ -328,10 +329,7 @@ class PDFCropper:
             "caption_hint": candidate.get("caption", ""),
             "pixel_box": (x0_pad, y0_pad, x1_pad, y1_pad),
             "normalized_box": [
-                round(y0_pad / img_h, 4),
-                round(x0_pad / img_w, 4),
-                round(y1_pad / img_h, 4),
-                round(x1_pad / img_w, 4)
+                round(v, 4) for v in px_to_norm([x0_pad, y0_pad, x1_pad, y1_pad], img_w, img_h)
             ],
             "text_layer_info": text_layer_info
         }

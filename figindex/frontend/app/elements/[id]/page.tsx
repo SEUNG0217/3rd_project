@@ -5,6 +5,8 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { formatSourceTarget } from "../../lib/docTypeLabels";
+import { VisualElement } from "../../lib/types";
+import { unitFor } from "../../lib/tableUnits";
 
 // Dynamic import for react-pdf viewer to disable SSR
 const PdfViewer = dynamic(() => import("../../components/PdfViewer"), {
@@ -16,36 +18,6 @@ const PdfViewer = dynamic(() => import("../../components/PdfViewer"), {
     </div>
   ),
 });
-
-interface TableStructure {
-  columns: string[];
-  rows: Record<string, any>[];
-  unit?: string;
-  period_labels: string[];
-}
-
-interface VisualElement {
-  element_id: string;
-  doc_name: string;
-  page_number: number;
-  bbox: number[];
-  element_type: "TABLE" | "CHART" | "DIAGRAM";
-  image_path: string;
-  title_or_caption: string;
-  summary: string;
-  structured_data?: TableStructure;
-  hashtags: string[];
-  confidence_score: number;
-  review_status: string;
-  doc_title: string;
-  doc_type: string;
-  domain?: string;
-  source_org?: string;
-  authors: string[];
-  publish_date?: string;
-  entities: string[];
-  extra_metadata: Record<string, any>;
-}
 
 export default function ElementDetailPage() {
   const params = useParams();
@@ -196,21 +168,21 @@ export default function ElementDetailPage() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={`${backendUrl}${element.image_path}`}
-                alt={element.title_or_caption}
+                alt={element.caption || "도표 이미지"}
                 className="max-h-[350px] max-w-full object-contain rounded"
               />
             </div>
 
             <h1 className="text-xl font-bold text-slate-900 mt-4 mb-2 leading-snug">
-              {element.title_or_caption}
+              {element.caption || "제목 없음"}
             </h1>
             <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100 mb-3">
-              {element.summary}
+              {element.summary || ""}
             </p>
 
             {/* Hashtags */}
             <div className="flex flex-wrap gap-1.5">
-              {element.hashtags.map((tag, idx) => (
+              {(element.hashtags || []).map((tag, idx) => (
                 <span
                   key={idx}
                   className="text-xs px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-md font-medium"
@@ -222,7 +194,7 @@ export default function ElementDetailPage() {
           </div>
 
           {/* Section 2: AI Restored Structured Table */}
-          {element.structured_data && element.structured_data.columns && (
+          {element.table_data && element.table_data.columns && (
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
               <div className="flex items-center justify-between mb-3 border-b pb-3">
                 <div className="flex items-center gap-2">
@@ -231,9 +203,9 @@ export default function ElementDetailPage() {
                     Gemini AI 복원 구조화 데이터 (JSON)
                   </h3>
                 </div>
-                {element.structured_data.unit && (
+                {element.table_data.unit && (
                   <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                    단위: {element.structured_data.unit}
+                    단위: {element.table_data.unit}
                   </span>
                 )}
               </div>
@@ -242,28 +214,44 @@ export default function ElementDetailPage() {
                 <table className="w-full text-left border-collapse text-xs">
                   <thead className="bg-slate-100 text-slate-700 font-semibold border-b">
                     <tr>
-                      {element.structured_data.columns.map((col, idx) => (
+                      {element.table_data.columns.map((col, idx) => (
                         <th key={idx} className="p-2.5 whitespace-nowrap bg-slate-100">
                           {col}
+                          {element.table_data?.unit_by_column?.[col] && (
+                            <span className="ml-1 text-[10px] text-slate-500 font-normal">
+                              ({element.table_data.unit_by_column[col]})
+                            </span>
+                          )}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {element.structured_data.rows.map((row, rIdx) => (
-                      <tr key={rIdx} className="hover:bg-slate-50/80 transition-colors">
-                        {element.structured_data!.columns.map((col, cIdx) => (
-                          <td
-                            key={cIdx}
-                            className={`p-2.5 text-slate-700 whitespace-nowrap ${
-                              cIdx === 0 ? "font-semibold bg-slate-50/50" : "font-mono"
-                            }`}
-                          >
-                            {row[col] ?? "-"}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
+                    {element.table_data.rows.map((row, rIdx) => {
+                      const rowLabel = String(row[element.table_data!.columns[0]] ?? "");
+                      return (
+                        <tr key={rIdx} className="hover:bg-slate-50/80 transition-colors">
+                          {element.table_data!.columns.map((col, cIdx) => {
+                            const cellUnit = unitFor(element.table_data, rowLabel, col);
+                            return (
+                              <td
+                                key={cIdx}
+                                className={`p-2.5 text-slate-700 whitespace-nowrap ${
+                                  cIdx === 0 ? "font-semibold bg-slate-50/50" : "font-mono"
+                                }`}
+                              >
+                                {row[col] ?? "-"}
+                                {cIdx > 0 && cellUnit && row[col] != null && (
+                                  <span className="ml-1 text-[10px] text-slate-400 font-normal">
+                                    {cellUnit}
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

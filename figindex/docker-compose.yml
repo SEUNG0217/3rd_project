@@ -28,6 +28,7 @@ services:
     environment:
       - QDRANT_MODE=server
       - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=figindex_elements_v2
       - CROPS_DIR=/data/crops
       - PDFS_DIR=/data/pdfs
       - ENTITY_DICTIONARY_PATH=/data/entity_dictionary.csv
@@ -53,6 +54,7 @@ services:
     environment:
       - QDRANT_MODE=server
       - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=figindex_elements_v2
       - CROPS_DIR=/data/crops
       - PDFS_DIR=/data/pdfs
       - ENTITY_DICTIONARY_PATH=/data/entity_dictionary.csv

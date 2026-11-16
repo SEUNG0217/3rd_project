@@ -1,49 +1,48 @@
 from typing import Dict, Any, Optional
-from shared.schemas import ReviewStatus, ElementType
-from shared.schemas_legacy import TableStructure
+from shared.schemas import (
+    ReviewStatus,
+    ElementType,
+    TableData,
+    ConfidenceSignals,
+    SIGNAL_WEIGHTS,
+    CONFIDENCE_THRESHOLD,
+)
 
 
 class ConfidenceEvaluator:
     """
     Calculates re-normalized weighted sum confidence score from applicable signals (v0.3.1):
-    1. DocLayout-YOLO / Table detection score (s1, base weight 0.20)
-    2. JSON Schema validation binary pass/fail (s2, binary 0/1, base weight 0.25)
-    3. Numerical integrity check (s3, for TABLE only, base weight 0.25)
-    4. Self-consistency agreement (s4, conditional for TABLE or 0.70~0.85 boundary, base weight 0.15)
-    5. Text layer match rate (s5, for TABLE with text layer only, base weight 0.15)
+    1. DocLayout-YOLO / Table detection score (detection_score, weight 0.20)
+    2. JSON Schema validation binary pass/fail (schema_valid, binary 0/1, weight 0.25)
+    3. Numerical integrity check (numeric_consistency, for TABLE only, weight 0.25)
+    4. Self-consistency agreement (self_consistency, conditional for TABLE, weight 0.15)
+    5. Text layer match rate (text_match, for TABLE with text layer only, weight 0.15)
     """
 
-    BASE_WEIGHTS = {
-        "detection_score": 0.20,
-        "schema_valid": 0.25,
-        "math_integrity": 0.25,
-        "self_consistency": 0.15,
-        "text_layer_match": 0.15,
-    }
-
-    CONFIDENCE_THRESHOLD = 0.80
+    BASE_WEIGHTS = SIGNAL_WEIGHTS
 
     def evaluate_signals(
         self,
         element_type: ElementType,
         detection_score: float,
         is_schema_valid: bool,
-        structured_data: Optional[TableStructure] = None,
+        table_data: Optional[TableData] = None,
         self_consistency_score: Optional[float] = None,
         text_layer_info: Optional[Dict[str, Any]] = None,
         llm_raw_text: str = ""
     ) -> Dict[str, Any]:
         """
         Evaluate individual signals and re-normalize weights so their sum equals 1.0.
+        Signals that are not applied remain None.
         """
         applicable_signals = ["detection_score", "schema_valid", "self_consistency"]
         
         has_text_layer = text_layer_info and text_layer_info.get("has_vector_text", False)
 
         if element_type == ElementType.TABLE:
-            applicable_signals.append("math_integrity")
+            applicable_signals.append("numeric_consistency")
             if has_text_layer:
-                applicable_signals.append("text_layer_match")
+                applicable_signals.append("text_match")
 
         # 1. Detection score (s1)
         s1 = min(max(float(detection_score), 0.0), 1.0)
@@ -52,7 +51,7 @@ class ConfidenceEvaluator:
         s2 = 1.0 if is_schema_valid else 0.0
 
         # 3. Table numerical integrity check (s3)
-        s3 = self._check_math_integrity(structured_data) if "math_integrity" in applicable_signals else 0.0
+        s3 = self._check_math_integrity(table_data) if "numeric_consistency" in applicable_signals else None
 
         # 4. Self-consistency score (s4, conditional)
         if self_consistency_score is not None:
@@ -61,14 +60,14 @@ class ConfidenceEvaluator:
             s4 = 1.0  # Default neutral/pass when not triggered
 
         # 5. Text layer match rate (s5)
-        s5 = self._check_text_layer_match(text_layer_info, llm_raw_text) if "text_layer_match" in applicable_signals else 0.0
+        s5 = self._check_text_layer_match(text_layer_info, llm_raw_text) if "text_match" in applicable_signals else None
 
-        signal_values = {
+        signal_values: Dict[str, Optional[float]] = {
             "detection_score": s1,
             "schema_valid": s2,
-            "math_integrity": s3,
+            "numeric_consistency": s3,
             "self_consistency": s4,
-            "text_layer_match": s5
+            "text_match": s5
         }
 
         # Calculate re-normalized weights
@@ -80,40 +79,49 @@ class ConfidenceEvaluator:
 
         # Compute final weighted sum
         final_score = sum(
-            renormalized_weights[sig] * signal_values[sig]
+            renormalized_weights[sig] * float(signal_values[sig] or 0.0)
             for sig in applicable_signals
         )
         final_score = round(min(max(final_score, 0.0), 1.0), 4)
 
-        # Single threshold routing (0.80)
-        if final_score >= self.CONFIDENCE_THRESHOLD:
+        # Single threshold routing (CONFIDENCE_THRESHOLD)
+        if final_score >= CONFIDENCE_THRESHOLD:
             status = ReviewStatus.APPROVED
         else:
             status = ReviewStatus.PENDING_REVIEW
+
+        signals_obj = ConfidenceSignals(
+            detection_score=s1,
+            schema_valid=s2,
+            numeric_consistency=s3,
+            self_consistency=s4,
+            text_match=s5
+        )
 
         return {
             "confidence_score": final_score,
             "review_status": status,
             "applicable_signals": applicable_signals,
             "renormalized_weights": {k: round(v, 4) for k, v in renormalized_weights.items()},
-            "signal_values": {k: round(v, 4) for k, v in signal_values.items()}
+            "signal_values": {k: round(v, 4) if v is not None else None for k, v in signal_values.items()},
+            "signals": signals_obj,
         }
 
-    def _check_math_integrity(self, structured_data: Optional[TableStructure]) -> float:
+    def _check_math_integrity(self, table_data: Optional[TableData]) -> float:
         """Check if structured table data has valid columns, rows, and numbers."""
-        if not structured_data:
+        if not table_data:
             return 0.3
-        if not structured_data.columns or not structured_data.rows:
+        if not table_data.columns or not table_data.rows:
             return 0.4
         
         # Check numerical completeness in rows
         valid_rows = 0
-        for row in structured_data.rows:
+        for row in table_data.rows:
             numeric_cells = sum(1 for v in row.values() if isinstance(v, (int, float)))
             if numeric_cells > 0:
                 valid_rows += 1
 
-        ratio = valid_rows / len(structured_data.rows)
+        ratio = valid_rows / len(table_data.rows)
         return min(max(ratio, 0.5), 1.0)
 
     def _check_text_layer_match(self, text_layer_info: Optional[Dict[str, Any]], llm_raw_text: str) -> float:

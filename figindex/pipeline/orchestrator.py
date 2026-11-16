@@ -6,6 +6,8 @@ import hashlib
 import logging
 import threading
 import unicodedata
+import json
+import uuid
 from datetime import date
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -18,15 +20,22 @@ from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
-from shared.schemas import ElementType, ReviewStatus
-from shared.schemas_legacy import VisualElementSchema
+from shared.schemas import (
+    ElementType,
+    ReviewStatus,
+    Document,
+    Element,
+    ElementSearchPayload,
+    DocStatus,
+    PIPELINE_VERSION,
+)
 
 try:
     from cropper import PDFCropper
     from extractor import MultimodalExtractor
 except ImportError:
-    from app.pipeline.cropper import PDFCropper
-    from app.pipeline.extractor import MultimodalExtractor
+    from pipeline.cropper import PDFCropper
+    from pipeline.extractor import MultimodalExtractor
 
 
 DOC_TYPE_CODE_MAP: Dict[str, str] = {
@@ -330,7 +339,23 @@ class ExtractionPipelineOrchestrator:
         self.qdrant_mode = os.getenv("QDRANT_MODE", "server").lower()
         self.qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333")
         self.qdrant_local_path = os.getenv("QDRANT_LOCAL_PATH", "/data/qdrant_local")
-        self.collection_name = os.getenv("QDRANT_COLLECTION", "figindex_elements")
+        self.collection_name = os.getenv("QDRANT_COLLECTION", "figindex_elements_v2")
+
+        # Load doc_id_map for stable document ID assignment
+        self.doc_id_map: Dict[str, str] = {}
+        for map_path in [
+            Path("/data/migration/doc_id_map.json"),
+            Path(__file__).resolve().parent.parent / "data" / "migration" / "doc_id_map.json",
+            Path("figindex/data/migration/doc_id_map.json"),
+            Path("data/migration/doc_id_map.json"),
+        ]:
+            if map_path.exists():
+                try:
+                    with open(map_path, "r", encoding="utf-8") as f:
+                        self.doc_id_map = json.load(f)
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to load doc_id_map from {map_path}: {e}")
 
         if self.qdrant_mode == "local":
             warn_msg = (
@@ -526,9 +551,15 @@ class ExtractionPipelineOrchestrator:
         norm = math.sqrt(sum(x * x for x in vec)) or 1.0
         return [x / norm for x in vec]
 
-    def index_element_to_qdrant(self, element: VisualElementSchema):
-        """Upsert a single VisualElementSchema into Qdrant collection."""
-        text_to_embed = f"{element.title_or_caption} {element.summary} {' '.join(element.hashtags)} {element.doc_title} {element.source_org} {' '.join(element.entities)}"
+    def get_doc_id(self, doc_name: str) -> str:
+        """doc_id_map에 존재하는 경우 기존 doc_id를 재사용하고, 없으면 새로 발급합니다."""
+        if doc_name in self.doc_id_map:
+            return self.doc_id_map[doc_name]
+        return uuid.uuid4().hex[:16]
+
+    def index_element_to_qdrant(self, element: ElementSearchPayload):
+        """Upsert a single ElementSearchPayload into Qdrant collection."""
+        text_to_embed = f"{element.caption} {element.summary} {' '.join(element.hashtags)} {element.doc_title or ''} {element.source_org or ''} {' '.join(element.entities)}"
         dense_vec = self.get_dense_embedding(text_to_embed)
         sparse_tokens = self.tokenize_korean_bm25(text_to_embed)
         sparse_indices = list(sparse_tokens.keys())
@@ -554,13 +585,13 @@ class ExtractionPipelineOrchestrator:
             ]
         )
 
-    def process_pdf(self, pdf_path: Path, max_pages: int = 15, max_elements_per_pdf: int = 4) -> List[VisualElementSchema]:
+    def process_pdf(self, pdf_path: Path, max_pages: int = 15, max_elements_per_pdf: int = 4) -> List[ElementSearchPayload]:
         """
         Process a single PDF document:
-        1. Extract document-level metadata
+        1. Extract document-level metadata & create Document object
         2. Detect and crop visual elements across pages
-        3. Analyze with Gemini Multimodal model
-        4. Upsert to Qdrant collection
+        3. Analyze with Gemini Multimodal model to get Element objects
+        4. Compose ElementSearchPayload and upsert to Qdrant collection
         """
         doc = fitz.open(str(pdf_path))
         doc_name = pdf_path.name
@@ -569,7 +600,55 @@ class ExtractionPipelineOrchestrator:
         doc_metadata = self.extract_document_metadata(doc, doc_name)
         print(f"  -> Extracted Metadata: 유형={doc_metadata['doc_type']}, 대상={doc_metadata.get('target')}, 출처={doc_metadata.get('source_org')}, 발행일={doc_metadata['publish_date']}, 종목={doc_metadata.get('ticker')}")
 
-        indexed_elements: List[VisualElementSchema] = []
+        # 1회 문서 객체(Document) 생성 (메모리에서만 유지)
+        doc_id = self.get_doc_id(doc_name)
+        try:
+            with open(pdf_path, "rb") as f:
+                doc_hash = hashlib.sha256(f.read()).hexdigest()
+        except Exception:
+            doc_hash = hashlib.sha256(doc_name.encode("utf-8")).hexdigest()
+
+        target = doc_metadata.get("target") or doc_metadata.get("company")
+        source_org = doc_metadata.get("source_org") or doc_metadata.get("broker")
+        doc_type = doc_metadata.get("doc_type", "REPORT")
+        doc_title = doc_metadata.get("doc_title", doc_name)
+        industry = doc_metadata.get("industry")
+        domain = industry or ("금융/산업" if doc_type == "REPORT" else None)
+        authors = [doc_metadata["analyst"]] if doc_metadata.get("analyst") else []
+        pub_date = doc_metadata.get("publish_date")
+        if isinstance(pub_date, str):
+            try:
+                pub_date = date.fromisoformat(pub_date)
+            except Exception:
+                pub_date = date.today()
+        elif not isinstance(pub_date, date):
+            pub_date = date.today()
+
+        extra_metadata = {
+            "target": target,
+            "company": target if doc_type == "REPORT" else None,
+            "ticker": doc_metadata.get("ticker"),
+            "broker": source_org if doc_type == "REPORT" else None,
+            "industry": industry,
+            "analyst": doc_metadata.get("analyst"),
+        }
+
+        document = Document(
+            doc_id=doc_id,
+            doc_hash=doc_hash,
+            doc_name=doc_name,
+            doc_title=doc_title,
+            doc_type=doc_type,
+            domain=domain,
+            source_org=source_org,
+            authors=authors,
+            publish_date=pub_date,
+            page_count=len(doc),
+            doc_status=DocStatus.PROCESSING,
+            extra_metadata=extra_metadata,
+        )
+
+        indexed_elements: List[ElementSearchPayload] = []
         extracted_count = 0
 
         for p_idx in range(1, total_pages + 1):
@@ -598,20 +677,35 @@ class ExtractionPipelineOrchestrator:
 
                     print(f"    [P.{p_idx}] Cropped {crop_info['hint_type']}: {crop_info['relative_path']}")
 
-                    # Analyze with Gemini Multimodal
-                    element = self.extractor.analyze_crop(
+                    # Analyze with Gemini Multimodal -> Element 반환
+                    element: Element = self.extractor.analyze_crop(
                         crop_info=crop_info,
                         doc_name=doc_name,
                         page_number=p_idx,
                         doc_metadata=doc_metadata,
-                        detection_score=0.92
+                        detection_score=0.92,
+                        doc_id=document.doc_id
                     )
 
-                    print(f"    [AI Analyzed] Type: {element.element_type.value} | Title: {element.title_or_caption[:35]} | Conf: {element.confidence_score*100:.1f}% ({element.review_status.value})")
+                    caption_summary = element.caption[:35] if element.caption else "제목 없음"
+                    print(f"    [AI Analyzed] Type: {element.element_type.value} | Title: {caption_summary} | Conf: {element.confidence_score*100:.1f}% ({element.review_status.value})")
+
+                    # ElementSearchPayload 생성
+                    payload_obj = ElementSearchPayload(
+                        **element.model_dump(),
+                        doc_name=document.doc_name,
+                        doc_title=document.doc_title,
+                        doc_type=document.doc_type,
+                        domain=document.domain,
+                        source_org=document.source_org,
+                        authors=document.authors,
+                        publish_date=document.publish_date,
+                        collection_id=document.collection_id
+                    )
 
                     # Upsert to Qdrant
-                    self.index_element_to_qdrant(element)
-                    indexed_elements.append(element)
+                    self.index_element_to_qdrant(payload_obj)
+                    indexed_elements.append(payload_obj)
                     extracted_count += 1
 
                 except Exception as e:
