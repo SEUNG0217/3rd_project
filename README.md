@@ -2,7 +2,8 @@
 
 > **프로젝트 상태**: v0.4 MVP 개발 환경 구축 완료  
 > **기획·설계 명세서**: [`docs/FigIndex_통합_기획_설계서.md`](docs/FigIndex_통합_기획_설계서.md)  
-> **Docker 세부 가이드**: [`figindex/README.md`](figindex/README.md)
+> **Docker 세부 가이드**: [`figindex/README.md`](figindex/README.md)  
+> **처음 참여한 팀원**: [`docs/onboarding.md`](docs/onboarding.md) → [`docs/roles/`](docs/roles/README.md)
 
 ---
 
@@ -112,7 +113,7 @@ docker compose down
 │   ├── .gitignore                  # figindex 하위 제외 규칙
 │   ├── README.md                   # Docker 상세 인프라 가이드
 │   ├── shared/                     # 백엔드 & 파이프라인 공통 모듈
-│   │   └── schemas.py              # VisualElementSchema (Pydantic v2 데이터 모델)
+│   │   └── schemas.py              # 유일한 스키마 기준 (Element, ElementSearchPayload, TableData 등)
 │   ├── backend/                    # FastAPI 기반 초경량 REST API 서버 (포트 8000)
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
