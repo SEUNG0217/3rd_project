@@ -358,6 +358,13 @@ export default function Home() {
             확신도 &lt; 0.80
           </span>
         </button>
+
+        <Link
+          href="/compare"
+          className="px-5 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center gap-2 bg-white text-slate-600 hover:bg-slate-50 border border-slate-200"
+        >
+          <span>📊 리포트 수치 비교</span>
+        </Link>
       </div>
 
       {activeTab === "review" ? (
