@@ -58,6 +58,13 @@ class ReviewAction(str, Enum):
     REJECT = "REJECT"    # 반려
 
 
+class PeriodBasis(str, Enum):
+    """표 열 기간의 성격. 원문 접미사로 판단하고, 접미사가 없으면 None (추측하지 않는다)."""
+    ACTUAL = "ACTUAL"      # 실적: 2025A, 1Q25A
+    ESTIMATE = "ESTIMATE"  # 추정: 2026E, 2026F, 26E
+    PRELIM = "PRELIM"      # 잠정: 3Q26P
+
+
 class LayoutClass(str, Enum):
     """DocLayout-YOLO 탐지 클래스 (모델 출력 이름 그대로).
 
@@ -287,6 +294,41 @@ class ElementSearchPayload(Element):
     authors: List[str] = Field(default_factory=list)
     publish_date: Optional[date] = None
     collection_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# 비교
+# ---------------------------------------------------------------------------
+
+class ComparisonCell(BaseModel):
+    """여러 문서의 표에서 같은 지표 × 같은 기간을 찾아 모은 값 1칸.
+
+    원문 값(raw_*)은 그대로 두고, 비교용으로 환산한 값은 value·unit에 둔다.
+    """
+    element_id: str
+    doc_id: str
+    doc_name: str
+    source_org: Optional[str] = Field(None, description="출처 (증권 리포트면 증권사)")
+    publish_date: Optional[date] = None
+    page_number: int = Field(..., ge=1)
+    metric_name: str = Field(..., description="대표 지표명 (shared/normalize.py METRIC_ALIASES의 키)")
+    period_key: str = Field(..., description="정규화 기간 (연간 '2026', 분기 '2026Q3')")
+    period_basis: Optional[PeriodBasis] = Field(None, description="실적/추정/잠정. 원문 표기가 없으면 None")
+    raw_row_label: str = Field(..., description="원문 행 라벨")
+    raw_column: str = Field(..., description="원문 열 이름")
+    raw_value: CellValue = Field(None, description="원문 셀 값")
+    raw_unit: Optional[str] = Field(None, description="원문 단위 (TableData.unit_for 결과)")
+    value: Optional[float] = Field(None, description="비교 단위로 환산한 값. 환산할 수 없으면 원문 숫자 그대로")
+    unit: Optional[str] = Field(None, description="value의 단위")
+
+
+class ComparisonResult(BaseModel):
+    """대상 1개 × 지표 1개의 문서 간 비교 결과."""
+    target: str = Field(..., description="비교 대상 (extra_metadata.target 값)")
+    metric_name: str
+    unit: Optional[str] = Field(None, description="환산 기준 단위 (원화 금액일 때만)")
+    period_keys: List[str] = Field(default_factory=list, description="등장한 기간, 오래된 순")
+    cells: List[ComparisonCell] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

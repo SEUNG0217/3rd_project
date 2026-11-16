@@ -25,8 +25,11 @@ from shared.schemas import (
     ReviewStatus,
     ElementSearchPayload,
     TableData,
+    ComparisonResult,
     CONFIDENCE_THRESHOLD,
 )
+from shared.compare import available_metrics, build_comparison
+from shared.normalize import METRIC_ALIASES
 
 
 @asynccontextmanager
@@ -495,6 +498,65 @@ def get_elements(
                     print(f"[Warn] Schema parsing error: {e}")
 
     return elements
+
+
+def _scroll_target_tables(target: str) -> List[Dict[str, Any]]:
+    """대상(extra_metadata.target)의 승인된 TABLE 요소 payload를 모두 가져옵니다."""
+    client = get_qdrant_client()
+    scroll_filter = qmodels.Filter(
+        must=[
+            qmodels.FieldCondition(key="extra_metadata.target", match=qmodels.MatchValue(value=target)),
+            qmodels.FieldCondition(key="element_type", match=qmodels.MatchValue(value=ElementType.TABLE.value)),
+            qmodels.FieldCondition(key="review_status", match=qmodels.MatchValue(value=ReviewStatus.APPROVED.value)),
+        ]
+    )
+    payloads: List[Dict[str, Any]] = []
+    next_offset = None
+    with qdrant_call_guard():
+        ensure_payload_indexes(client)
+        while True:
+            records, next_offset = client.scroll(
+                collection_name=QDRANT_COLLECTION,
+                scroll_filter=scroll_filter,
+                limit=200,
+                offset=next_offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            payloads.extend(rec.payload for rec in records if rec.payload)
+            if next_offset is None:
+                break
+    return payloads
+
+
+@app.get("/api/compare/metrics")
+def get_compare_metrics(
+    target: str = Query(..., description="비교 대상 (예: 롯데쇼핑). /api/filter-options의 targets 값"),
+):
+    """대상의 승인된 표에서 비교할 수 있는 지표와, 그 지표를 가진 문서 수를 돌려줍니다.
+
+    문서 수가 2 이상인 지표만 실제 비교가 됩니다.
+    """
+    metrics = available_metrics(_scroll_target_tables(target))
+    return {"target": target, "metrics": metrics}
+
+
+@app.get("/api/compare", response_model=ComparisonResult)
+def get_comparison(
+    target: str = Query(..., description="비교 대상 (예: 롯데쇼핑)"),
+    metric: str = Query(..., description="대표 지표명 (예: 영업이익). 목록은 /api/compare/metrics"),
+    unit: Optional[str] = Query(None, description="원화 환산 단위 (원, 천원, 백만원, 억원, 십억원, 조원). 비우면 가장 많이 쓰인 단위"),
+):
+    """같은 대상의 여러 문서 표에서 같은 지표 × 같은 기간 값을 모아 돌려줍니다.
+
+    - 원화 금액은 한 단위로 환산하고, 원문 값·단위는 raw_value·raw_unit에 그대로 둡니다.
+    - 비율(%)·배수(배)는 환산하지 않습니다. 이름이 같아도 계산 기준이 다를 수 있으니 raw_row_label을 함께 보여 주세요.
+    """
+    from fastapi import HTTPException
+
+    if metric not in METRIC_ALIASES:
+        raise HTTPException(status_code=400, detail=f"알 수 없는 지표입니다: {metric}. 가능한 값: {list(METRIC_ALIASES)}")
+    return build_comparison(_scroll_target_tables(target), target, metric, unit)
 
 
 @app.get("/api/filter-options")

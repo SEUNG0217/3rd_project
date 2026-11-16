@@ -6,21 +6,27 @@
 - 저장된 데이터는 바꾸지 않는다. 비교 시점에만 계산한다.
 - 근거 데이터: figindex/data/analysis/period_labels.csv, row_labels.csv (2026-11-13 분석)
 
-반환 형식은 schemas.py에 모델이 정해지기 전까지 dict로 둔다.
-(schemas.py 추가 제안: PeriodBasis Enum, MetricEntry, ComparisonCell — PR 본문 참고)
+비교 결과 모델은 schemas.py의 ComparisonCell, ComparisonResult, 기간 성격은 PeriodBasis.
 """
 from __future__ import annotations
 
 import re
 from typing import Dict, List, Optional, Tuple
 
+from shared.schemas import PeriodBasis
+
 # ---------------------------------------------------------------------------
 # 1. 기간
 # ---------------------------------------------------------------------------
 # period_key 형식: "2026" (연간) / "2026Q3" (분기)
-# basis: "A" 실적, "E" 추정(E·F 통합), "P" 잠정, None 표기 없음(실적/추정 판단하지 않음)
+# period_basis: 원문 접미사 A/E/F/P → PeriodBasis. 접미사가 없으면 None (실적/추정 판단하지 않음)
 
-_BASIS_MAP = {"A": "A", "E": "E", "F": "E", "P": "P"}
+_BASIS_MAP = {
+    "A": PeriodBasis.ACTUAL,
+    "E": PeriodBasis.ESTIMATE,
+    "F": PeriodBasis.ESTIMATE,
+    "P": PeriodBasis.PRELIM,
+}
 
 # 기간과 함께 붙으면 "그 기간의 값"이 아닌 열 (수정 전후, 증감률, 컨센서스 등) → 비교 대상에서 뺀다
 _QUALIFIER_TOKENS = (
@@ -53,8 +59,8 @@ _PERIOD_PATTERNS: List[re.Pattern] = [
 def normalize_period(label: str) -> Optional[Dict[str, object]]:
     """열 이름을 기간으로 해석한다. 기간이 아니거나 수식어가 붙은 열이면 None.
 
-    >>> normalize_period("3Q26P")
-    {'period_key': '2026Q3', 'year': 2026, 'quarter': 3, 'basis': 'P', 'raw': '3Q26P'}
+    >>> normalize_period("3Q26P")["period_key"]
+    '2026Q3'
     """
     if label is None:
         return None
@@ -82,9 +88,15 @@ def normalize_period(label: str) -> Optional[Dict[str, object]]:
         quarter_text = groups.get("q") or groups.get("q2") or groups.get("q3") or groups.get("q4")
         quarter = int(quarter_text) if quarter_text else None
         basis_char = groups.get("basis") or groups.get("basis_y")
-        basis = _BASIS_MAP.get(basis_char.upper()) if basis_char else None
+        period_basis = _BASIS_MAP.get(basis_char.upper()) if basis_char else None
         period_key = f"{year}Q{quarter}" if quarter else f"{year}"
-        return {"period_key": period_key, "year": year, "quarter": quarter, "basis": basis, "raw": raw}
+        return {
+            "period_key": period_key,
+            "year": year,
+            "quarter": quarter,
+            "period_basis": period_basis,
+            "raw": raw,
+        }
     return None
 
 
@@ -117,6 +129,17 @@ METRIC_ALIASES: Dict[str, List[str]] = {
     "배당수익률": ["배당수익률", "배당수익율", "시가배당률"],
     "부채비율": ["부채비율", "부채/자본"],
 }
+
+# 지표별 단위 성격. 원화 환산은 AMOUNT만 한다 (EPS·BPS는 원이지만 주당 값이라 환산하지 않음).
+METRIC_UNIT_GROUP: Dict[str, str] = {
+    "매출액": "AMOUNT", "영업이익": "AMOUNT", "세전이익": "AMOUNT", "당기순이익": "AMOUNT",
+    "지배주주순이익": "AMOUNT", "매출총이익": "AMOUNT", "매출원가": "AMOUNT", "EBITDA": "AMOUNT",
+    "영업이익률": "PERCENT", "순이익률": "PERCENT", "ROE": "PERCENT", "ROA": "PERCENT",
+    "배당수익률": "PERCENT", "부채비율": "PERCENT",
+    "PER": "MULTIPLE", "PBR": "MULTIPLE", "EV/EBITDA": "MULTIPLE",
+    "EPS": "PER_SHARE", "BPS": "PER_SHARE",
+}
+_GROUP_DEFAULT_UNIT = {"PERCENT": "%", "MULTIPLE": "배", "PER_SHARE": "원"}
 
 _ALIAS_INDEX: Dict[str, str] = {
     alias.lower(): metric for metric, aliases in METRIC_ALIASES.items() for alias in aliases
@@ -166,7 +189,43 @@ def normalize_metric(label: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# 3. 금액 단위 환산 (원화만)
+# 3. 셀 값 → 숫자
+# ---------------------------------------------------------------------------
+# glossary 9절: 숫자는 숫자로 저장하는 게 규칙이지만, 추출 결과에 "5,470", "△1.2", "(3.0)", "4.0%"
+# 같은 문자열이 남아 있을 수 있다. 비교할 때만 읽고, 저장값은 바꾸지 않는다.
+_NUMBER = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
+_EMPTY_MARKS = {"", "-", "–", "—", "n/a", "na", "nm", "n.m.", "적지", "흑전", "적전", "적확", "흑지"}
+
+
+def parse_number(value: object) -> Optional[float]:
+    """셀 값을 숫자로 읽는다. 읽을 수 없으면 None.
+
+    >>> parse_number("5,470"), parse_number("△1.2"), parse_number("(3.0)"), parse_number("4.0%")
+    (5470.0, -1.2, -3.0, 4.0)
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace(",", "").replace(" ", "")
+    if text.lower() in _EMPTY_MARKS:
+        return None
+    negative = False
+    if text.startswith("△") or text.startswith("▽"):
+        negative, text = True, text[1:]
+    elif text.startswith("(") and text.endswith(")"):
+        negative, text = True, text[1:-1]
+    elif text.startswith("▲"):
+        text = text[1:]
+    text = text.rstrip("%")
+    if not _NUMBER.match(text):
+        return None
+    number = float(text)
+    return -abs(number) if negative else number
+
+
+# ---------------------------------------------------------------------------
+# 4. 금액 단위 환산 (원화만)
 # ---------------------------------------------------------------------------
 KRW_SCALE: Dict[str, float] = {
     "원": 1.0,
@@ -190,12 +249,48 @@ def normalize_unit(unit: Optional[str]) -> Optional[str]:
     return text
 
 
+def extract_krw_unit(text: Optional[str]) -> Optional[str]:
+    """"십억원 (단위별 상이)", "(십억원)", "십억 원" 같은 글에서 원화 단위를 찾는다."""
+    if not text:
+        return None
+    compact = str(text).replace(" ", "")
+    for unit in sorted(KRW_SCALE, key=len, reverse=True):
+        if unit in compact:
+            return unit
+    return None
+
+
+def resolve_unit(
+    metric_name: str,
+    row_label: str,
+    explicit_row_unit: Optional[str],
+    explicit_column_unit: Optional[str],
+    table_unit: Optional[str],
+    header_label: Optional[str] = None,
+) -> Optional[str]:
+    """셀 단위를 정한다. 우선순위:
+    unit_by_row → 행 라벨 괄호 단위 → unit_by_column → 지표 성격 기본값(%·배·원) → 표 단위·첫 열 머리글의 원화 단위
+    """
+    if explicit_row_unit:
+        return normalize_unit(explicit_row_unit)
+    _, hint = clean_row_label(row_label)
+    if hint:
+        return normalize_unit(hint)
+    if explicit_column_unit:
+        return normalize_unit(explicit_column_unit)
+    group = METRIC_UNIT_GROUP.get(metric_name)
+    if group in _GROUP_DEFAULT_UNIT:
+        return _GROUP_DEFAULT_UNIT[group]
+    return extract_krw_unit(table_unit) or extract_krw_unit(header_label) or normalize_unit(table_unit)
+
+
 def convert_krw(value: object, from_unit: Optional[str], to_unit: str) -> Optional[float]:
     """원화 금액을 다른 원화 단위로 환산한다. 숫자가 아니거나 원화 단위가 아니면 None."""
     src = normalize_unit(from_unit)
     dst = normalize_unit(to_unit)
     if src not in KRW_SCALE or dst not in KRW_SCALE:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    number = parse_number(value)
+    if number is None:
         return None
-    return float(value) * KRW_SCALE[src] / KRW_SCALE[dst]
+    return number * KRW_SCALE[src] / KRW_SCALE[dst]

@@ -15,7 +15,9 @@ FIGINDEX_DIR = REPO_ROOT / "figindex"
 if str(FIGINDEX_DIR) not in sys.path:
     sys.path.insert(0, str(FIGINDEX_DIR))
 
+from shared.schemas import PeriodBasis  # noqa: E402
 from shared.normalize import (  # noqa: E402
+    parse_number,
     clean_row_label,
     convert_krw,
     normalize_metric,
@@ -28,31 +30,31 @@ from shared.normalize import (  # noqa: E402
 # 기간
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "raw, period_key, basis",
+    "raw, period_key, period_basis",
     [
         # 연간
         ("2025", "2025", None),
-        ("2026E", "2026", "E"),
-        ("2026F", "2026", "E"),
-        ("2025A", "2025", "A"),
-        ("2026P", "2026", "P"),
+        ("2026E", "2026", PeriodBasis.ESTIMATE),
+        ("2026F", "2026", PeriodBasis.ESTIMATE),
+        ("2025A", "2025", PeriodBasis.ACTUAL),
+        ("2026P", "2026", PeriodBasis.PRELIM),
         ("2024년", "2024", None),
-        ("26E", "2026", "E"),
-        ("27F", "2027", "E"),
+        ("26E", "2026", PeriodBasis.ESTIMATE),
+        ("27F", "2027", PeriodBasis.ESTIMATE),
         ("25", "2025", None),
-        ("'26E", "2026", "E"),
+        ("'26E", "2026", PeriodBasis.ESTIMATE),
         ("’22", "2022", None),
         ("FY25", "2025", None),
-        ("FY2026E", "2026", "E"),
-        ("2026E_Annual", "2026", "E"),
+        ("FY2026E", "2026", PeriodBasis.ESTIMATE),
+        ("2026E_Annual", "2026", PeriodBasis.ESTIMATE),
         ("2025*_Annual", "2025", None),
         # 분기
         ("3Q25", "2025Q3", None),
-        ("3Q26P", "2026Q3", "P"),
-        ("4Q26E", "2026Q4", "E"),
-        ("4Q26F", "2026Q4", "E"),
-        ("1Q25A", "2025Q1", "A"),
-        ("3Q.26P", "2026Q3", "P"),
+        ("3Q26P", "2026Q3", PeriodBasis.PRELIM),
+        ("4Q26E", "2026Q4", PeriodBasis.ESTIMATE),
+        ("4Q26F", "2026Q4", PeriodBasis.ESTIMATE),
+        ("1Q25A", "2025Q1", PeriodBasis.ACTUAL),
+        ("3Q.26P", "2026Q3", PeriodBasis.PRELIM),
         ("1Q.25", "2025Q1", None),
         ("3Q 25", "2025Q3", None),
         ("3Q2025", "2025Q3", None),
@@ -60,17 +62,17 @@ from shared.normalize import (  # noqa: E402
         ("25.3Q", "2025Q3", None),
         ("25Q3", "2025Q3", None),
         ("2025 1Q", "2025Q1", None),
-        ("2026F 2Q", "2026Q2", "E"),
+        ("2026F 2Q", "2026Q2", PeriodBasis.ESTIMATE),
         ("2025_1Q*", "2025Q1", None),
-        ("2026_3QP", "2026Q3", "P"),
-        ("2026_4QE", "2026Q4", "E"),
+        ("2026_3QP", "2026Q3", PeriodBasis.PRELIM),
+        ("2026_4QE", "2026Q4", PeriodBasis.ESTIMATE),
     ],
 )
-def test_normalize_period_parses(raw, period_key, basis):
+def test_normalize_period_parses(raw, period_key, period_basis):
     result = normalize_period(raw)
     assert result is not None, raw
     assert result["period_key"] == period_key
-    assert result["basis"] == basis
+    assert result["period_basis"] == period_basis
     assert result["raw"] == raw
 
 
@@ -176,4 +178,46 @@ def test_convert_krw_rejects_non_krw():
     assert convert_krw(4.0, "%", "억원") is None
     assert convert_krw(12.3, "배", "억원") is None
     assert convert_krw("n/a", "억원", "십억원") is None
+    assert convert_krw("-", "억원", "십억원") is None
     assert convert_krw(True, "억원", "십억원") is None
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (5470, 5470.0), (4.0, 4.0), ("5,470", 5470.0), ("137,383", 137383.0), ("△1.2", -1.2),
+        ("(3.0)", -3.0), ("-1.2", -1.2), ("4.0%", 4.0), ("▲5", 5.0), (" 12 ", 12.0),
+        ("-", None), ("n/a", None), ("적지", None), ("흑전", None), ("텍스트", None), (None, None), (True, None),
+    ],
+)
+def test_parse_number(raw, expected):
+    assert parse_number(raw) == expected
+
+
+def test_convert_krw_reads_string_numbers():
+    assert convert_krw("5,470", "억원", "십억원") == pytest.approx(547.0)
+
+
+from shared.normalize import extract_krw_unit, resolve_unit  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "text, unit",
+    [("십억원 (단위별 상이)", "십억원"), ("(십억원)", "십억원"), ("억 원", "억원"), ("십억원 (비율은 %)", "십억원"),
+     ("%", None), (None, None)],
+)
+def test_extract_krw_unit(text, unit):
+    assert extract_krw_unit(text) == unit
+
+
+def test_resolve_unit_priority():
+    # unit_by_row가 가장 우선
+    assert resolve_unit("영업이익", "영업이익", "억원", "십억원", "십억원") == "억원"
+    # 행 라벨 괄호 단위가 표 단위보다 우선
+    assert resolve_unit("EPS", "EPS (원)", None, None, "십억원 (단위별 상이)") == "원"
+    # 지표 성격 기본값이 표 단위보다 우선
+    assert resolve_unit("ROE", "ROE", None, None, "십억원") == "%"
+    assert resolve_unit("PER", "PER", None, None, "십억원") == "배"
+    # 금액 지표는 표 단위나 첫 열 머리글에서 원화 단위를 찾는다
+    assert resolve_unit("매출액", "매출액", None, None, "십억원 (단위별 상이)") == "십억원"
+    assert resolve_unit("매출액", "매출액", None, None, None, "(십억원)") == "십억원"
