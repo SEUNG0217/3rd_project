@@ -5,55 +5,7 @@ import Link from "next/link";
 import ComparisonModal from "./components/ComparisonModal";
 import ReviewTab from "./components/ReviewTab";
 import { getDocTypeLabels, formatSourceTarget } from "./lib/docTypeLabels";
-
-interface HealthStatus {
-  status: string;
-  service: string;
-  qdrant_url: string;
-  qdrant_connected: boolean;
-  collection_name: string;
-  collection_exists: boolean;
-  total_elements?: number;
-  error?: string;
-}
-
-interface TableStructure {
-  columns: string[];
-  rows: Record<string, any>[];
-  unit?: string;
-  period_labels: string[];
-}
-
-interface VisualElement {
-  element_id: string;
-  doc_name: string;
-  page_number: number;
-  bbox: number[];
-  element_type: "TABLE" | "CHART" | "DIAGRAM";
-  image_path: string;
-  title_or_caption: string;
-  summary: string;
-  structured_data?: TableStructure;
-  hashtags: string[];
-  confidence_score: number;
-  review_status: string;
-  doc_title: string;
-  doc_type: string;
-  domain?: string;
-  source_org?: string;
-  authors: string[];
-  publish_date?: string;
-  entities: string[];
-  extra_metadata: Record<string, any>;
-}
-
-interface FilterOptions {
-  doc_types: string[];
-  source_orgs: Record<string, string[]>;
-  targets: Record<string, string[]>;
-  publish_dates: string[];
-  element_types: string[];
-}
+import { HealthStatus, VisualElement, FilterOptions } from "./lib/types";
 
 export default function Home() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -652,7 +604,7 @@ export default function Home() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={`${backendUrl}${elem.image_path}`}
-                    alt={elem.title_or_caption}
+                    alt={elem.caption || "도표 이미지"}
                     className="max-h-full max-w-full object-contain p-2 transition-transform duration-200 group-hover:scale-105"
                     onError={(e) => {
                       const target = e.target as HTMLElement;
@@ -704,15 +656,15 @@ export default function Home() {
                 {/* Card Body: Title, 2-Line Summary, Hashtags */}
                 <div className="p-4">
                   <h3 className="font-bold text-base text-slate-900 mb-2 line-clamp-2 leading-snug group-hover:text-indigo-600 transition-colors">
-                    {elem.title_or_caption}
+                    {elem.caption || "제목 없음"}
                   </h3>
                   <p className="text-xs text-slate-600 mb-3 line-clamp-2 leading-relaxed">
-                    {elem.summary}
+                    {elem.summary || ""}
                   </p>
 
                   {/* Hashtags */}
                   <div className="flex flex-wrap gap-1">
-                    {elem.hashtags.slice(0, 4).map((tag, tIdx) => (
+                    {(elem.hashtags || []).slice(0, 4).map((tag, tIdx) => (
                       <span
                         key={tIdx}
                         className="text-[11px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded"

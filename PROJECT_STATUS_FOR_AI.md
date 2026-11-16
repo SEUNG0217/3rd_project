@@ -2,25 +2,25 @@
 
 # FigIndex 프로젝트 종합 현황서 (AI 분석·인수인계용)
 
-- **작성 시각**: 2026-11-13 16:45 (KST)
-- **현재 브랜치**: `refactor/schema-unify` (기준 커밋: `1a90908`)
+- **작성 시각**: 2026-11-16 10:22 (KST)
+- **현재 브랜치**: `refactor/schema-unify` (기준 커밋: `b531816`)
 - **저장소 루트**: `c:\workAi\workProject\3차플젝`
-- **검사기 상태**: `check_state.py --full` PASS=11 (전 항목 통과, 0 FAIL)
+- **검사기 상태**: `check_state.py --full` PASS=10, WARN=1, FAIL=0 (엄격 금지 이름 0건, 단위 테스트 58건 전원 통과)
 
 ---
 
 ## 0. 한눈에 보기 (10줄 이내)
 
-1. **지금 단계**: v2 컬렉션 이전(465건) 및 데이터 분석 완료, **프롬프트 4a(백엔드·프론트엔드 v2 전환) 진입 직전**입니다.
-2. **서비스가 보는 컬렉션**: 백엔드와 프론트엔드는 **여전히 옛 컬렉션 `figindex_elements`(525건)**를 바라보고 있습니다.
-3. **새 컬렉션 상태**: `figindex_elements_v2`는 **465건(문서 113개)**으로 생성되어 읽기 전용으로 대기 중입니다.
-4. **바로 다음 작업**: **4a 단계** — 백엔드/프론트의 컬렉션 대상을 `figindex_elements_v2`로 전환하고, `caption`/`table_data` 필드 치환 및 `TableData.unit_for()` 기반 단위 표시를 구현합니다.
-5. **그 다음 작업**: **4b 단계** — 파이프라인을 새 스키마로 전환하고 `schemas_legacy.py`와 루트 `app/`을 완전히 정리합니다.
-6. **합병 목표**: 화요일(11/17) `main` 브랜치 병합을 목표로 리팩토링 안정화를 진행합니다.
-7. **절대 하면 안 되는 것 (Warning)**:
-   - `python figindex/pipeline/run_index.py` 실행 금지 (4b 전까지 옛 형식으로 쓰기 때문)
-   - Qdrant 컬렉션(`figindex_elements`, `figindex_elements_v2`) 임의 쓰기·수정·삭제 금지
-   - `schemas.py`, `AGENTS.md`, `docs/glossary.md` 무단 수정 및 기준선 임의 저장(`--save-baseline`) 금지
+1. **지금 단계**: **4a(백엔드/프론트엔드 전환) 및 4b(파이프라인 전환 및 레거시 정리) 전면 완료**, **브랜치 병합(`refactor/schema-unify` ➔ `main`) 직전**입니다.
+2. **서비스가 보는 컬렉션**: 백엔드, 프론트엔드, 파이프라인 모두 **새 컬렉션 `figindex_elements_v2`(465건)**를 단일 기준으로 바라보고 있습니다.
+3. **새 컬렉션 상태**: `figindex_elements_v2`는 **465건(문서 113개)**으로 서비스 중이며, 파이프라인 색인과 백엔드 조회가 완벽히 `ElementSearchPayload`로 일치합니다.
+4. **금지 이름 상태**: `figindex/` 코드베이스 전체에서 **엄격 금지 이름이 기준선 114건에서 0건으로 완전 박멸**되었습니다.
+5. **바로 다음 작업**: **브랜치 병합 및 릴리스** — `refactor/schema-unify` 브랜치를 검증하고 화요일(11/17) `main` 브랜치에 병합합니다.
+6. **그 다음 작업**: **3주차 과제** — DocLayout-YOLO 파이프라인 정식 이식, 확신도 5개 신호 정규화, ReviewLog 누적 불변화, 지표·기간 정규화 사전 엔진 탑재.
+7. **주의사항 (Warning)**:
+   - `schemas.py`, `AGENTS.md`, `docs/glossary.md` 무단 수정 금지
+   - Qdrant 실서비스 컬렉션(`figindex_elements`, `figindex_elements_v2`) 임의 삭제·수정 금지
+   - 루트 `app/`은 `scripts/generate_sample_pdf.py` 참조가 남아있어 삭제 대기 상태로 보존
 
 ---
 
@@ -33,9 +33,9 @@
   - **Vector DB**: Qdrant (`dense` 1536차원 Cosine + `sparse` BM25, 포트 `6333`/`6334`)
   - **Pipeline**: PyMuPDF(`fitz`), `kiwipiepy`, `doclayout-yolo`, Gemini Multimodal API, OpenAI Embeddings (`text-embedding-3-small`)
 - **실행 환경 (`figindex/docker-compose.yml`)**:
-  - `figindex-qdrant`, `figindex-backend`, `figindex-frontend` 3개 서비스가 로컬 Docker에서 정상 가동 중 (`QDRANT_MODE=server`).
+  - `figindex-qdrant`, `figindex-backend`, `figindex-frontend` 3개 서비스가 로컬 Docker에서 정상 가동 중 (`QDRANT_MODE=server`, `QDRANT_COLLECTION=figindex_elements_v2`).
   - `pipeline` 서비스는 `profiles: ["index"]`로 분리되어 독립 컨테이너 실행 지원 (`docker compose run --rm pipeline ...`).
-  - 로컬 프로덕션 검증용 `figindex/docker-compose.prod.yml` 별도 구비.
+  - 로컬 프로덕션 검증용 `figindex/docker-compose.prod.yml` 별도 구비 (`QDRANT_COLLECTION=figindex_elements_v2` 적용).
 
 ---
 
@@ -56,20 +56,17 @@
 
 | 컬렉션 / 자원 | 건수 | 상태 | 비고 |
 | :--- | :---: | :---: | :--- |
-| **`figindex_elements` (옛 컬렉션)** | **525건** | 읽기 전용 (보존) | **현재 백엔드/프론트엔드가 조회 중인 실서비스 데이터** (스냅샷 백업 완료) |
-| **`figindex_elements_v2` (새 컬렉션)** | **465건** | 읽기 전용 (대기) | **새 스키마 적용 완료** (문서 113개, 승인 386건, 검수 대기 79건, 중복 60건 제외) |
+| **`figindex_elements_v2` (새 컬렉션)** | **465건** | **실서비스 조회 및 색인** | **백엔드/프론트엔드/파이프라인 단일 기준**, `ElementSearchPayload` 적용 (문서 113개, 승인 386건, 검수 대기 79건) |
+| **`figindex_elements` (옛 컬렉션)** | **525건** | 읽기 전용 (보존) | v1 스냅샷 및 롤백 대비용 보존 데이터 |
 | **크롭 이미지 (`figindex/data/crops/`)** | 578개 | 정상 보존 | 서빙 경로 `/static/crops/{filename}` 지원 |
 | **원본 PDF (`figindex/data/pdfs/`)** | 118건 | 정상 보존 | 색인 완료 113건 + 미색인 5건 (원문 404 누락 0건) |
 | **엔티티 사전 (`figindex/data/entity_dictionary.csv`)** | 1건+헤더 | 기본 탑재 | SK하이닉스 및 주요 기업 티커 매핑 지원 |
 
-> [!IMPORTANT]
-> **핵심 인지 사항**: v2 컬렉션(465건)은 완벽히 생성 및 검증되었으나, **서비스 코드가 아직 전환되지 않아 백엔드/프론트는 여전히 옛 컬렉션(525건)을 보고 있습니다.** 4a 단계에서 이를 v2로 안전하게 스왑합니다.
-
 - **마이그레이션 기록 위치 (`figindex/data/migration/`)**:
+  - `api_changes.md`: v1 ➔ v2 API 응답/요청 변경 내역 및 신규 필드 명세
   - `doc_id_map.json`: 고유 문서 113개에 대한 `doc_name` ➔ `doc_id` 단일 발급 맵
   - `execute_v2_20261113-0351.md`: v2 컬렉션 실제 이전 실행 결과 및 검증 리포트
   - `dropped_elements_20261113-0350.csv`: 중복 제외된 60건의 메타데이터 보존 파일
-  - `doc_name_audit_*.md`: 파일명 이중 색인 조사 리포트
 - **데이터 분석 기록 위치 (`figindex/data/analysis/`)**:
   - `comparability_20261113-1633.md`: 교차 증권사 비교 가능성 정량 분석 리포트
   - `targets.csv`: 종목별 리포트/증권사/테이블 집계 (47개 종목)
@@ -98,41 +95,51 @@
 16. **상태 검사기 A1 수정 금지 파일 감시 보강 (`4957d35`, `56fd587`)**: `--allow-protected` 도입 및 경로 정규화 결함 수정.
 17. **상태 검사기 A2·A7 보완 (`dd10aef`, `53f35e4`)**: A2 상위 파일별 개수 표기, A7 문법 검사 범위 복원, 일회성 도구 제외.
 18. **검사기 기준선 갱신 (`1a90908`)**: 일회성 도구 정리 후 엄격 금지 이름 기준선을 114건으로 갱신.
-19. **v2 데이터 비교 가능성 정량 분석 (`analyze_comparability.py`)**: 롯데쇼핑 등 2개 증권사 교차 테이블에서 동일 지표/기간 비교 가능성 실증 완료.
+19. **v2 데이터 비교 가능성 정량 분석 (`9888201`)**: 롯데쇼핑 등 2개 증권사 교차 테이블에서 동일 지표/기간 비교 가능성 실증 완료.
+20. **4a 단계: 백엔드·프론트엔드 v2 전환 완료**:
+    - 백엔드 `main.py` 컬렉션 기본값 `figindex_elements_v2`로 전환, `schemas_legacy` 제거, `ElementSearchPayload`/`TableData` 응답 모델 적용, `ReviewActionRequest` 표준화, 확신도 임계값 `CONFIDENCE_THRESHOLD` 적용.
+    - `docker-compose.yml`, `docker-compose.prod.yml` 환경변수 적용.
+    - `docs/migration/api_changes.md`, `lib/types.ts`, `lib/tableUnits.ts` 작성 및 프론트엔드 4개 파일 엄격 금지 이름 70건 전수 제거(0건 달성).
+21. **4b 단계: 파이프라인 새 스키마 전환 및 레거시 정리 완료 (현재 단계)**:
+    - **파이프라인 5개 파일 스키마 전면 치환**: `extractor.py`, `evaluator.py`, `orchestrator.py`, `run_index.py`, `test_metadata_generalization.py`에서 `VisualElementSchema`, `TableStructure`, `title_or_caption`, `structured_data` 전수 제거 (0건 달성).
+    - **역할 분리 구현**: `orchestrator`가 `Document` 1회 메타데이터 추출 및 메모리 유지 (`doc_id_map.json` 연동), `extractor`는 `doc_id`를 받아 `Element` 생성, `orchestrator`가 `ElementSearchPayload`를 조합해 Qdrant upsert.
+    - **확신도 평가기 표준화**: `evaluator.py`에서 자체 상수를 제거하고 `SIGNAL_WEIGHTS`, `CONFIDENCE_THRESHOLD` import 및 `ConfidenceSignals` 객체 구성.
+    - **좌표 변환 표준화**: `cropper.py` 및 `yolo_trial.py`에서 `coords.py` (`px_to_norm`, `norm_to_px`) 함수 연동 및 `file_name` ➔ `doc_name` 치환.
+    - **레거시 파일 삭제**: `figindex/shared/schemas_legacy.py` 영구 삭제 완료.
+    - **루트 app/ 참조 조사**: `scripts/generate_sample_pdf.py`의 참조 확인으로 보존 처리.
+    - **시험 컬렉션 검증 통과**: `figindex_elements_4b_test` 생성 후 1건 색인(2개 도표) ➔ `ElementSearchPayload.model_validate()` PASS, bbox 0~1 `[x0, y0, x1, y1]` PASS, `doc_id` 일치 PASS 확인 후 컬렉션 안전 삭제 완료.
+    - **정합성 검사 통과**: `check_state.py --full` PASS=10, WARN=1, FAIL=0 및 파이프라인 pytest 58건 전원 통과.
 
 ---
 
-## 5. 검사기 현재 기준선
+## 5. 검사기 현재 상태
 
-- **총 엄격 금지 이름**: **114건** (`scripts/check_baseline.json` 기준)
-  - **4a 대상 (백엔드 1 + 프론트엔드 4 = 70건)**:
-    - `figindex/backend/app/main.py`: 19건 (`VisualElementSchema`: 12, `title_or_caption`: 3, `structured_data`: 3, `TableStructure`: 1)
-    - `figindex/frontend/app/components/ReviewTab.tsx`: 18건 (`title_or_caption`: 11, `structured_data`: 5, `TableStructure`: 2)
-    - `figindex/frontend/app/components/ComparisonModal.tsx`: 14건 (`title_or_caption`: 9, `structured_data`: 3, `TableStructure`: 2)
-    - `figindex/frontend/app/elements/[id]/page.tsx`: 13건 (`structured_data`: 8, `title_or_caption`: 3, `TableStructure`: 2)
-    - `figindex/frontend/app/page.tsx`: 6건 (`title_or_caption`: 3, `TableStructure`: 2, `structured_data`: 1)
-  - **4b 대상 (파이프라인 5개 파일 = 44건)**:
-    - `figindex/pipeline/extractor.py`: 20건 (`structured_data`: 8, `title_or_caption`: 5, `VisualElementSchema`: 5, `TableStructure`: 2)
-    - `figindex/pipeline/evaluator.py`: 11건 (`structured_data`: 8, `TableStructure`: 3)
-    - `figindex/pipeline/orchestrator.py`: 7건 (`VisualElementSchema`: 5, `title_or_caption`: 2)
-    - `figindex/pipeline/run_index.py`: 4건 (`structured_data`: 2, `title_or_caption`: 2)
-    - `figindex/pipeline/test_metadata_generalization.py`: 2건 (`structured_data`: 1, `title_or_caption`: 1)
-- **일반 금지 이름**: 43건
-- **단위 테스트**: 파이프라인 58건 + 상태 검사기 11건 = 총 69건 100% 통과
+- **엄격 금지 이름 검사 (A2)**: **0건 (기준선 114건 대비 114건 전면 감소, 개선)**
+  - `figindex/backend/app/main.py`: **0건**
+  - `figindex/pipeline/extractor.py`: **0건**
+  - `figindex/pipeline/evaluator.py`: **0건**
+  - `figindex/pipeline/orchestrator.py`: **0건**
+  - `figindex/pipeline/run_index.py`: **0건**
+  - `figindex/pipeline/test_metadata_generalization.py`: **0건**
+  - `figindex/pipeline/rename_reports.py`: **0건**
+  - `figindex/pipeline/yolo_trial.py`: **0건**
+  - `figindex/frontend/app/components/ReviewTab.tsx`: **0건**
+  - `figindex/frontend/app/components/ComparisonModal.tsx`: **0건**
+  - `figindex/frontend/app/elements/[id]/page.tsx`: **0건**
+  - `figindex/frontend/app/page.tsx`: **0건**
+- **A3 직접 쓴 상태 문자열**: **PASS** (6건 감소, 현재 41건)
+- **A4 직접 쓴 확신도 임계값**: **PASS** (1건 감소, 현재 4건)
+- **A5 Import 규칙**: **PASS** (app.schemas 0건, legacy 참조 0개 파일)
+- **A6 모델 중복 정의**: **PASS** (0건)
+- **A7 Python 문법 검사**: **PASS** (30개 파일 전체 정상)
+- **A8 단위 테스트 검사**: **PASS** (58건 100% 성공)
+- **B1 API 상태 검사**: **PASS**
+- **B2 Qdrant 데이터 검사**: **PASS** (BBox 위반 0건)
+- **B3 프론트엔드 타입 검사**: **PASS** (타입 에러 0건)
 
 ---
 
 ## 6. 다음 단계 (로드맵)
-
-### 4a 단계: 백엔드·프론트엔드 v2 전환 (예정)
-- 서비스 대상 컬렉션을 `figindex_elements_v2`로 전환 (`check_config.json`, `docker-compose.yml`, 백엔드 설정).
-- 백엔드/프론트엔드 코드의 엄격 금지 이름 70건 전면 제거 (`title_or_caption` ➔ `caption`, `structured_data` ➔ `table_data`, `VisualElementSchema` ➔ `ElementSearchPayload`).
-- 프론트엔드 표 상세 및 모달에 `TableData.unit_for()` 연동 및 행별·열별 단위 표시 구현.
-
-### 4b 단계: 파이프라인 새 스키마 전환 및 레거시 정리 (예정)
-- 파이프라인 5개 파일의 엄격 금지 이름 44건 치환 (`extractor.py`, `evaluator.py`, `orchestrator.py`, `run_index.py`).
-- 임시 호환 파일 `figindex/shared/schemas_legacy.py` 및 루트 `app/` 디렉터리 완전 제거.
-- `from shared.schemas import ...`로 파이프라인 전면 통일.
 
 ### 브랜치 병합 (화요일 11/17)
 - `refactor/schema-unify` 브랜치 회귀 검증 완료 후 `main` 브랜치 병합.
@@ -147,69 +154,5 @@
 
 ## 7. 알려진 문제·주의점
 
-1. **파이프라인 실행 금지**: 4b 단계가 완료되기 전까지 `python figindex/pipeline/run_index.py`를 실행해서는 안 됩니다. 현재 파이프라인은 옛 스키마 형식으로 데이터를 생성하므로 새 v2 컬렉션을 오염시킬 위험이 있습니다.
-2. **DocLayout-YOLO 라이선스 (AGPL-3.0)**: DocLayout-YOLO 모델은 AGPL-3.0 라이선스이므로, 향후 상용화 또는 외부 SaaS 배포 시 파이프라인 컨테이너를 별도 네트워크 서비스로 격리하거나 대안 모델(Apache 2.0 등)을 검토해야 합니다.
-3. **실데이터 쓰기 잠금**: 현재 Qdrant의 `figindex_elements`(525건)와 `figindex_elements_v2`(465건)는 읽기 전용 상태를 유지해야 하며, 임의 쓰기는 금지됩니다.
-
----
-
-## 8. 저장소 파일 맵
-
-```text
-3차플젝/
-├── AGENTS.md                                # AI 코딩 규칙 (필드명, 쓰지 않는 이름, 금지 파일 정의)
-├── PROJECT_RULES.md                         # 프로젝트 작업 기본 수칙
-├── PROJECT_STATUS_FOR_AI.md                 # 본 현황서 (매번 전체 재작성)
-├── README.md                                # 프로젝트 개요
-├── docs/
-│   ├── glossary.md                          # 용어집 (단위 규칙 4원칙, 표 수치, 좌표계 등)
-│   └── FigIndex_통합_기획_설계서.md
-├── scripts/
-│   ├── check_state.py                       # 형상·스키마·단위테스트 상태 검사기
-│   ├── check_config.json                    # 검사기 설정 (스캔 디렉터리, 제외 목록, 보호 파일)
-│   ├── check_baseline.json                  # 검사기 기준선 (A2 엄격 114건 기준)
-│   ├── test_check_state_a1.py               # A1 수정 금지 감시 단위 테스트 (7건)
-│   ├── test_check_state_a2.py               # A2/A7 파일별 카운트/문법 검사 단위 테스트 (4건)
-│   ├── concurrency_check.py                 # 백엔드 API 동시성 검증 도구
-│   ├── local_to_server.py                   # Qdrant 로컬 -> 서버 이전 도구
-│   └── migrate_source_target.py             # 메타데이터 마이그레이션 도구
-└── figindex/
-    ├── docker-compose.yml                   # 로컬 개발용 Docker Compose (server 모드)
-    ├── docker-compose.prod.yml              # 로컬 프로덕션 검증용
-    ├── shared/                              # [표준 기준 모듈]
-    │   ├── schemas.py                       # 단일 표준 스키마 (SSOT, 11개 모델)
-    │   ├── schemas_legacy.py                # 임시 호환 모델 (VisualElementSchema 등, 4b에서 삭제 예정)
-    │   └── coords.py                        # 바운딩 박스 정규화 [x0, y0, x1, y1] 및 좌표 변환 모듈
-    ├── backend/
-    │   └── app/main.py                      # FastAPI 백엔드 (현재 525건 조회 중, 4a 전환 대상)
-    ├── frontend/
-    │   └── app/                             # Next.js 14 프론트엔드 (4a 전환 대상)
-    │       ├── page.tsx                     # 메인 검색·필터 페이지
-    │       ├── elements/[id]/page.tsx       # 요소 상세 페이지
-    │       └── components/                  # ReviewTab, ComparisonModal 등
-    ├── pipeline/                            # [색인 파이프라인 - 4b 전환 대상]
-    │   ├── pdf_text.py                      # PDF 좌표 순서 정렬 텍스트 추출 모듈 (신규)
-    │   ├── test_pdf_text.py                 # pdf_text 단위 테스트 (4건)
-    │   ├── test_schemas_table_units.py      # TableData 단위 필드 단위 테스트 (6건)
-    │   ├── analyze_comparability.py         # 비교 가능성 데이터 분석 스크립트 (신규)
-    │   ├── migrate_to_v2.py                 # v2 컬렉션 이전 실행 도구
-    │   ├── audit_doc_names.py               # 파일명 감사 도구
-    │   ├── extractor.py, orchestrator.py, evaluator.py, cropper.py, run_index.py
-    │   └── test_coords.py, test_migrate_to_v2.py, test_metadata_generalization.py
-    └── data/
-        ├── pdfs/                            # 원본 PDF 118건
-        ├── crops/                           # 크롭 이미지 578건
-        ├── entity_dictionary.csv            # 엔티티 사전
-        ├── migration/                       # v2 이전 기록 (doc_id_map.json, execute_v2_*.md 등)
-        └── analysis/                        # 비교 가능성 분석 결과 (comparability_*.md, CSV 3종)
-```
-
----
-
-## 9. 다른 AI에게 질문할 때 예시
-
-- **4a 백엔드·프론트엔드 v2 전환 설계 시**:
-  > "첨부한 `PROJECT_STATUS_FOR_AI.md`와 `figindex/shared/schemas.py`를 참조하여, 현재 백엔드(`backend/app/main.py`)와 프론트엔드(`frontend/app/`)가 `figindex_elements_v2` 컬렉션을 조회하도록 변경하고, `title_or_caption` ➔ `caption`, `structured_data` ➔ `table_data`로 치환하며, `TableData.unit_for()`를 활용해 단위가 섞인 표에서 셀별 단위를 올바르게 표시하는 4a 단계 수정 계획을 작성해줘."
-
-- **4b 파이프라인 새 스키마 전환 설계 시**:
-  > "`PROJECT_STATUS_FOR_AI.md`를 바탕으로, 파이프라인(`extractor.py`, `evaluator.py`, `orchestrator.py`, `run_index.py`) 내 레거시 모델(`VisualElementSchema`, `TableStructure`)과 옛 필드명을 새 스키마(`Element`, `caption`, `table_data`)로 전면 교체하고, `schemas_legacy.py`와 루트 `app/`을 안전하게 제거하는 4b 단계 상세 변경 가이드를 제안해줘."
+1. **루트 app/ 디렉터리 보존 사유**: `scripts/generate_sample_pdf.py` 라인 8에서 `from app.core.config import settings`를 참조하고 있으므로, 해당 스크립트 리팩토링 전까지 루트 `app/`은 임의 삭제하지 않고 유지합니다.
+2. **실서비스 Qdrant 컬렉션 보존**: 실서비스 컬렉션인 `figindex_elements_v2`(465건)와 보존용 `figindex_elements`(525건)에 대한 직접적인 데이터 삭제/쓰기는 엄격히 제한됩니다.

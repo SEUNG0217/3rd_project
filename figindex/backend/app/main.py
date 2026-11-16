@@ -23,10 +23,9 @@ load_dotenv()
 from shared.schemas import (
     ElementType,
     ReviewStatus,
-)
-from shared.schemas_legacy import (
-    VisualElementSchema,
-    TableStructure,
+    ElementSearchPayload,
+    TableData,
+    CONFIDENCE_THRESHOLD,
 )
 
 
@@ -172,7 +171,7 @@ def get_crop_image_endpoint(filename: str):
 # Qdrant Client Configuration (Dual Mode: Server vs Local Embedded)
 QDRANT_MODE = os.getenv("QDRANT_MODE", "server").lower()
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
-QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "figindex_elements")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "figindex_elements_v2")
 
 # AI & Embedding Model
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -263,14 +262,11 @@ def get_dense_query_embedding(text: str) -> List[float]:
 
 
 class ReviewActionRequest(BaseModel):
-    review_action: Optional[str] = Field(None, description="'APPROVE' 또는 'REJECT' (schemas.py 표준)")
-    action: Optional[str] = Field(None, description="'APPROVE' 또는 'REJECT' (하위 호환용)")
-    element_type: Optional[str] = None
+    review_action: str = Field(..., description="'APPROVE' 또는 'REJECT' (schemas.py 표준)")
+    element_type: Optional[ElementType] = None
     caption: Optional[str] = Field(None, description="도표 제목/캡션 (schemas.py 표준)")
-    title_or_caption: Optional[str] = Field(None, description="도표 제목/캡션 (하위 호환용)")
     summary: Optional[str] = None
-    table_data: Optional[Dict[str, Any]] = Field(None, description="표 구조 데이터 (schemas.py 표준)")
-    structured_data: Optional[Dict[str, Any]] = Field(None, description="표 구조 데이터 (하위 호환용)")
+    table_data: Optional[TableData] = Field(None, description="표 구조 데이터 (schemas.py 표준)")
 
 
 @app.get("/api/version")
@@ -394,7 +390,7 @@ def ensure_payload_indexes(client: QdrantClient) -> None:
         _PAYLOAD_INDEXES_ENSURED = True
 
 
-@app.get("/api/elements", response_model=List[VisualElementSchema])
+@app.get("/api/elements", response_model=List[ElementSearchPayload])
 def get_elements(
     query: Optional[str] = Query(None, description="자연어 문장 검색어 (Qdrant 시맨틱 벡터 검색)"),
     element_type: Optional[str] = Query(None, description="요소 유형 필터 (TABLE, CHART, DIAGRAM)"),
@@ -414,10 +410,10 @@ def get_elements(
     - 검색 응답 목표: 1초 이내 고속 응답
     """
     client = get_qdrant_client()
-    elements: List[VisualElementSchema] = []
+    elements: List[ElementSearchPayload] = []
 
     # Build payload filters if specified
-    effective_status = review_status or status or "APPROVED"
+    effective_status = review_status or status or ReviewStatus.APPROVED.value
     must_filters = []
     if effective_status and effective_status.upper() != "ALL":
         must_filters.append(
@@ -478,7 +474,7 @@ def get_elements(
         for hit in search_response.points:
             if hit.payload:
                 try:
-                    elements.append(VisualElementSchema(**hit.payload))
+                    elements.append(ElementSearchPayload(**hit.payload))
                 except Exception as e:
                     print(f"[Warn] Schema parsing error: {e}")
     else:
@@ -494,7 +490,7 @@ def get_elements(
         for rec in records:
             if rec.payload:
                 try:
-                    elements.append(VisualElementSchema(**rec.payload))
+                    elements.append(ElementSearchPayload(**rec.payload))
                 except Exception as e:
                     print(f"[Warn] Schema parsing error: {e}")
 
@@ -569,7 +565,7 @@ def get_filter_options():
     }
 
 
-@app.get("/api/search", response_model=List[VisualElementSchema])
+@app.get("/api/search", response_model=List[ElementSearchPayload])
 def search_elements_endpoint(
     q: str = Query(..., description="검색 쿼리"),
     element_type: Optional[str] = None,
@@ -579,14 +575,14 @@ def search_elements_endpoint(
     return get_elements(query=q, element_type=element_type, limit=limit)
 
 
-@app.get("/api/review/elements", response_model=List[VisualElementSchema])
+@app.get("/api/review/elements", response_model=List[ElementSearchPayload])
 def get_pending_review_elements(limit: int = 50, _auth: None = Depends(verify_admin_password)):
     """
-    확신도 0.80 미만 또는 검수 대기(PENDING_REVIEW) 상태인 도표 목록을 반환합니다.
+    확신도 CONFIDENCE_THRESHOLD 미만 또는 검수 대기(PENDING_REVIEW) 상태인 도표 목록을 반환합니다.
     (관리자 비밀번호 인증 필요: Header 'X-Admin-Password')
     """
     client = get_qdrant_client()
-    # Fetch items with review_status == PENDING_REVIEW or confidence_score < 0.80
+    # Fetch items with review_status == PENDING_REVIEW or confidence_score < CONFIDENCE_THRESHOLD
     with qdrant_call_guard():
         records, _ = client.scroll(
             collection_name=QDRANT_COLLECTION,
@@ -594,11 +590,11 @@ def get_pending_review_elements(limit: int = 50, _auth: None = Depends(verify_ad
                 should=[
                     qmodels.FieldCondition(
                         key="review_status",
-                        match=qmodels.MatchValue(value="PENDING_REVIEW")
+                        match=qmodels.MatchValue(value=ReviewStatus.PENDING_REVIEW.value)
                     ),
                     qmodels.FieldCondition(
                         key="confidence_score",
-                        range=qmodels.Range(lt=0.80)
+                        range=qmodels.Range(lt=CONFIDENCE_THRESHOLD)
                     )
                 ]
             ),
@@ -610,16 +606,16 @@ def get_pending_review_elements(limit: int = 50, _auth: None = Depends(verify_ad
     for r in records:
         p = r.payload or {}
         # Exclude already approved or rejected
-        if p.get("review_status") != "REJECTED" and (p.get("review_status") == "PENDING_REVIEW" or float(p.get("confidence_score", 1.0)) < 0.80):
-            if p.get("review_status") != "APPROVED":
+        if p.get("review_status") != ReviewStatus.REJECTED.value and (p.get("review_status") == ReviewStatus.PENDING_REVIEW.value or float(p.get("confidence_score", 1.0)) < CONFIDENCE_THRESHOLD):
+            if p.get("review_status") != ReviewStatus.APPROVED.value:
                 try:
-                    elements.append(VisualElementSchema(**p))
+                    elements.append(ElementSearchPayload(**p))
                 except Exception as e:
                     print(f"[Warn] Parsing error in review element: {e}")
     return elements
 
 
-@app.post("/api/review/{element_id}", response_model=VisualElementSchema)
+@app.post("/api/review/{element_id}", response_model=ElementSearchPayload)
 def submit_review_decision(element_id: str, req: ReviewActionRequest, _auth: None = Depends(verify_admin_password)):
     """
     관리자가 도표의 유형·제목·표 값을 수정한 뒤 승인(APPROVED) 또는 반려(REJECTED)합니다.
@@ -650,26 +646,24 @@ def submit_review_decision(element_id: str, req: ReviewActionRequest, _auth: Non
         point_id = results[0].id
         payload = dict(results[0].payload)
 
-        raw_action = req.review_action or req.action
+        raw_action = req.review_action
         if not raw_action:
-            raise HTTPException(status_code=400, detail="review_action(또는 action)은 필수입니다.")
+            raise HTTPException(status_code=400, detail="review_action은 필수입니다.")
 
         action = raw_action.upper()
-        if action == "APPROVE":
-            payload["review_status"] = "APPROVED"
+        if action in ("APPROVE", ReviewStatus.APPROVED.value):
+            payload["review_status"] = ReviewStatus.APPROVED.value
             payload["confidence_score"] = 1.0  # 관리자 검수 통과 완료
             if req.element_type:
-                payload["element_type"] = req.element_type.upper()
-            caption = req.caption if req.caption is not None else req.title_or_caption
-            if caption is not None:
-                payload["title_or_caption"] = caption
+                payload["element_type"] = req.element_type.value if hasattr(req.element_type, "value") else str(req.element_type).upper()
+            if req.caption is not None:
+                payload["caption"] = req.caption
             if req.summary:
                 payload["summary"] = req.summary
-            table_data = req.table_data if req.table_data is not None else req.structured_data
-            if table_data is not None:
-                payload["structured_data"] = table_data
-        elif action == "REJECT":
-            payload["review_status"] = "REJECTED"
+            if req.table_data is not None:
+                payload["table_data"] = req.table_data.model_dump() if hasattr(req.table_data, "model_dump") else (req.table_data.dict() if hasattr(req.table_data, "dict") else req.table_data)
+        elif action in ("REJECT", ReviewStatus.REJECTED.value):
+            payload["review_status"] = ReviewStatus.REJECTED.value
         else:
             raise HTTPException(status_code=400, detail="review_action은 'APPROVE' 또는 'REJECT'여야 합니다.")
 
@@ -680,10 +674,10 @@ def submit_review_decision(element_id: str, req: ReviewActionRequest, _auth: Non
             points=[point_id]
         )
 
-    return VisualElementSchema(**payload)
+    return ElementSearchPayload(**payload)
 
 
-@app.get("/api/elements/{element_id}", response_model=VisualElementSchema)
+@app.get("/api/elements/{element_id}", response_model=ElementSearchPayload)
 def get_element_by_id(element_id: str):
     """
     단일 도표·차트 요소 상세 정보를 조회합니다.
@@ -706,6 +700,6 @@ def get_element_by_id(element_id: str):
             with_vectors=False
         )
     if results and results[0].payload:
-        return VisualElementSchema(**results[0].payload)
+        return ElementSearchPayload(**results[0].payload)
 
     raise HTTPException(status_code=404, detail=f"도표 요소 '{element_id}'를 찾을 수 없습니다.")

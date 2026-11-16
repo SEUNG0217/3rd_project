@@ -12,17 +12,19 @@ from PIL import Image
 
 from shared.schemas import (
     ElementType,
-    ReviewStatus
+    ReviewStatus,
+    Element,
+    TableData,
+    ConfidenceSignals,
+    PIPELINE_VERSION,
+    CONFIDENCE_THRESHOLD,
 )
-from shared.schemas_legacy import (
-    VisualElementSchema,
-    TableStructure
-)
+from shared.coords import clip_bbox, validate_bbox
 
 try:
     from evaluator import ConfidenceEvaluator
 except ImportError:
-    from app.pipeline.evaluator import ConfidenceEvaluator
+    from pipeline.evaluator import ConfidenceEvaluator
 
 
 class MultimodalExtractor:
@@ -141,12 +143,12 @@ class MultimodalExtractor:
         doc_desc = doc_desc_map.get(doc_type, "PDF 문서")
 
         hashtag_example_map = {
-            "REPORT": '["#기업명", "#실적전망", "#산업분석"]',
-            "PUBLIC_REPORT": '["#정책동향", "#주요통계", "#발행기관"]',
-            "PAPER": '["#연구주제", "#실험결과", "#핵심방법론"]',
-            "IR": '["#분기실적", "#사업전략", "#ESG"]',
+            "REPORT": '["기업명", "실적전망", "산업분석"]',
+            "PUBLIC_REPORT": '["정책동향", "주요통계", "발행기관"]',
+            "PAPER": '["연구주제", "실험결과", "핵심방법론"]',
+            "IR": '["분기실적", "사업전략", "ESG"]',
         }
-        hashtag_ex = hashtag_example_map.get(doc_type, '["#핵심주제", "#주요지표", "#핵심요약"]')
+        hashtag_ex = hashtag_example_map.get(doc_type, '["핵심주제", "주요지표", "핵심요약"]')
 
         target = doc_metadata.get("target") or doc_metadata.get("company") or ""
         source_org = doc_metadata.get("source_org") or doc_metadata.get("broker") or ""
@@ -162,11 +164,11 @@ class MultimodalExtractor:
    - "CHART": 막대/꺾은선/원형 그래프, 추이 및 비중 시각화
    - "DIAGRAM": 산업 밸류체인 구조도, 공정 흐름도, 아키텍처 다이어그램, 연구 방법 흐름도, 개념도
 
-2. title_or_caption: 도표 상단/하단에 표기된 제목 (예: '[표 1] 연도별 추이', '그림 2. 주요 지표 비교'). 없을 경우 명확한 제목을 명명하세요.
+2. caption: 도표 상단/하단에 표기된 제목 또는 캡션 (예: '[표 1] 연도별 추이', '그림 2. 주요 지표 비교'). 없을 경우 명확한 제목을 명명하세요.
 3. summary: 도표가 전달하는 핵심 메시지와 주요 수치를 한국어로 2~3줄로 명확히 요약하세요.
-4. hashtags: 문서의 핵심 주제, 지표, 분야, 출처 키워드 (예: {hashtag_ex}) 최소 3개 이상.
+4. hashtags: 문서의 핵심 주제, 지표, 분야, 출처 키워드 ('#' 없이 단어만) (예: {hashtag_ex}) 최소 3개 이상.
 
-5. structured_data (element_type이 'TABLE'인 경우 필수, 그 외는 null):
+5. table_data (element_type이 'TABLE'인 경우 필수, 그 외는 null):
    {{
      "columns": ["구분", "2023", "2024E", ...],
      "rows": [
@@ -180,10 +182,10 @@ class MultimodalExtractor:
 출력 JSON 스키마:
 {{
   "element_type": "TABLE" | "CHART" | "DIAGRAM",
-  "title_or_caption": "...",
+  "caption": "...",
   "summary": "...",
   "hashtags": ["...", "..."],
-  "structured_data": {{ ... }} | null
+  "table_data": {{ ... }} | null
 }}
 """
 
@@ -193,10 +195,11 @@ class MultimodalExtractor:
         doc_name: str,
         page_number: int,
         doc_metadata: Dict[str, Any],
-        detection_score: float = 0.92
-    ) -> VisualElementSchema:
+        detection_score: float = 0.92,
+        doc_id: Optional[str] = None
+    ) -> Element:
         """
-        Analyze cropped image with Gemini Multimodal model and return VisualElementSchema.
+        Analyze cropped image with Gemini Multimodal model and return Element.
         """
         crop_path = Path(crop_info["crop_path"])
         img_hash = self.get_image_hash(crop_path)
@@ -254,10 +257,10 @@ class MultimodalExtractor:
             target_label = target or doc_name
             parsed = {
                 "element_type": crop_info.get("hint_type", "TABLE"),
-                "title_or_caption": raw_cap,
+                "caption": raw_cap,
                 "summary": f"{target_label} 문서 {page_number}페이지 수치 도표입니다.",
-                "hashtags": [f"#{target_label}", "#문서도표", "#데이터"],
-                "structured_data": None
+                "hashtags": [target_label, "문서도표", "데이터"],
+                "table_data": None
             }
 
         # Validate element_type enum
@@ -267,42 +270,52 @@ class MultimodalExtractor:
         element_type = ElementType(el_type_str)
 
         # Parse structured table data
-        structured_data_obj = None
-        if parsed.get("structured_data") and isinstance(parsed["structured_data"], dict):
+        table_data_raw = parsed.get("table_data")
+        table_data_obj = None
+        if table_data_raw and isinstance(table_data_raw, dict):
             try:
-                structured_data_obj = TableStructure(**parsed["structured_data"])
+                table_data_obj = TableData(**table_data_raw)
             except Exception:
-                is_schema_valid = False
+                try:
+                    # unit_by_row/column 없이 재시도
+                    clean_dict = {
+                        "columns": table_data_raw.get("columns", []),
+                        "rows": table_data_raw.get("rows", []),
+                        "unit": table_data_raw.get("unit"),
+                        "period_labels": table_data_raw.get("period_labels", []),
+                    }
+                    table_data_obj = TableData(**clean_dict)
+                except Exception:
+                    is_schema_valid = False
 
         # Calculate confidence score
         eval_result = self.evaluator.evaluate_signals(
             element_type=element_type,
             detection_score=detection_score,
             is_schema_valid=is_schema_valid,
-            structured_data=structured_data_obj,
+            table_data=table_data_obj,
             self_consistency_score=None,
             text_layer_info=crop_info.get("text_layer_info"),
             llm_raw_text=raw_text
         )
 
-        pub_date = doc_metadata.get("publish_date")
-        if isinstance(pub_date, str):
-            try:
-                pub_date = date.fromisoformat(pub_date)
-            except Exception:
-                pub_date = date.today()
-        elif not isinstance(pub_date, date):
-            pub_date = date.today()
-
-        # Build final VisualElementSchema (v0.4 format)
+        # Build entities
         ignored_defaults = {"", "증권사", "금융분석"}
-        raw_entities = [target, source_org] + list(parsed.get("hashtags", []))
+        raw_hashtags = parsed.get("hashtags", [])
+        cleaned_hashtags: List[str] = []
+        for tag in raw_hashtags:
+            if isinstance(tag, str):
+                c_tag = tag.lstrip("#").strip()
+                if c_tag and c_tag not in cleaned_hashtags:
+                    cleaned_hashtags.append(c_tag)
+
+        raw_entities = [target, source_org] + cleaned_hashtags
         entities: List[str] = []
         seen_entities = set()
         for item in raw_entities:
             if not isinstance(item, str):
                 continue
-            cleaned_ent = item.replace("#", "").strip()
+            cleaned_ent = item.lstrip("#").strip()
             if not cleaned_ent or cleaned_ent in ignored_defaults or cleaned_ent in seen_entities:
                 continue
             seen_entities.add(cleaned_ent)
@@ -318,7 +331,6 @@ class MultimodalExtractor:
                 "industry": doc_metadata.get("industry"),
                 "analyst": doc_metadata.get("analyst"),
             }
-            domain = doc_metadata.get("industry") or "금융/산업"
         else:
             extra_metadata = {
                 "target": target,
@@ -327,29 +339,66 @@ class MultimodalExtractor:
                 "broker": None,
                 "analyst": None,
             }
-            domain = None
 
-        element = VisualElementSchema(
+        # BBox normalization
+        raw_box = crop_info.get("normalized_box", [0.0, 0.0, 1.0, 1.0])
+        bbox = clip_bbox(raw_box)
+        try:
+            validate_bbox(bbox)
+        except Exception:
+            # 보정
+            bbox = [
+                min(bbox[0], bbox[2] - 0.001),
+                min(bbox[1], bbox[3] - 0.001),
+                max(bbox[2], bbox[0] + 0.001),
+                max(bbox[3], bbox[1] + 0.001),
+            ]
+            bbox = clip_bbox(bbox)
+
+        effective_doc_id = (
+            doc_id
+            or doc_metadata.get("doc_id")
+            or hashlib.md5(doc_name.encode("utf-8")).hexdigest()[:16]
+        )
+
+        caption_val = (
+            parsed.get("caption")
+            or crop_info.get("caption_hint")
+            or f"도표 p.{page_number}"
+        )
+
+        model_name = os.getenv("VISION_MODEL", getattr(self, "primary_model", "gemini-3.8-flash"))
+        signals_obj = eval_result.get("signals")
+        if not isinstance(signals_obj, ConfidenceSignals):
+            signals_obj = ConfidenceSignals()
+
+        review_status_val = eval_result.get("review_status", ReviewStatus.PENDING_REVIEW)
+        if isinstance(review_status_val, str):
+            try:
+                review_status_val = ReviewStatus(review_status_val)
+            except ValueError:
+                review_status_val = ReviewStatus.PENDING_REVIEW
+
+        element = Element(
             element_id=crop_info["element_id"],
-            doc_name=doc_name,
+            doc_id=effective_doc_id,
             page_number=page_number,
-            bbox=crop_info["normalized_box"],
+            bbox=bbox,
             element_type=element_type,
             image_path=crop_info["relative_path"],
-            title_or_caption=parsed.get("title_or_caption") or crop_info.get("caption_hint") or f"도표 p.{page_number}",
+            caption=caption_val,
             summary=parsed.get("summary", ""),
-            structured_data=structured_data_obj,
-            hashtags=parsed.get("hashtags", []),
-            confidence_score=eval_result["confidence_score"],
-            review_status=eval_result["review_status"],
-            doc_title=doc_metadata.get("doc_title", doc_name),
-            doc_type=doc_type,
-            domain=domain,
-            source_org=source_org,
-            authors=[doc_metadata.get("analyst")] if doc_metadata.get("analyst") else [],
-            publish_date=pub_date,
+            hashtags=cleaned_hashtags,
             entities=entities,
+            table_data=table_data_obj,
+            signals=signals_obj,
+            confidence_score=float(eval_result.get("confidence_score", 1.0)),
+            review_status=review_status_val,
+            pipeline_version=PIPELINE_VERSION,
+            model_name=model_name,
             extra_metadata=extra_metadata,
         )
+
+        return element
 
         return element
