@@ -102,53 +102,12 @@ GitHub에서 `main`으로 Pull Request를 만들고, 본문에 AI 보고 내용�
 
 ---
 
-## 4. 역할별 첫 요청
+## 4. 내 역할 시작하기
 
-각자 첫 작업은 코드를 거의 안 바꾸는 작은 일로 시작합니다. 프로젝트 구조를 익히는 게 목적입니다.
+`docs/roles/` 폴더에 역할별 브리핑이 있습니다. 혼자 읽지 말고 **AI에게 읽혀서 설명을 듣는 방식**으로 시작합니다.
+첫 메시지는 `docs/roles/README.md`의 "시작하는 법"을 복사해서 보내면 됩니다.
 
-### 팀원 A (크롭·탐지)
-```
-[읽을 것] AGENTS.md, figindex/pipeline/AGENTS.md, figindex/shared/coords.py, figindex/pipeline/yolo_trial.py
-[할 일] yolo_trial.py가 무엇을 하는지, 실행 방법과 결과 파일이 어디에 생기는지 설명해 줘.
-그리고 사용하는 체크포인트의 model.names 값이 schemas.py의 LayoutClass 값과 같은지 확인하는 방법을 알려 줘.
-[건드려도 되는 파일] 없음 (설명만)
-```
-
-### 팀원 B (추출·확신도·정답셋)
-```
-[읽을 것] AGENTS.md, figindex/pipeline/AGENTS.md, docs/glossary.md(6절, 7절, 11절, 12절)
-[할 일] 수치 정답셋(표 30개)을 만들려고 해. data/gt/table/에 표 1개당 어떤 파일 형식으로 저장하면
-TableData 모양과 맞고 나중에 cell_accuracy 계산에 바로 쓸 수 있는지 예시 1개와 함께 제안해 줘.
-[건드려도 되는 파일] 없음 (제안만)
-```
-
-### 팀원 C (검색·사전)
-```
-[읽을 것] AGENTS.md, figindex/backend/AGENTS.md, docs/glossary.md(10절), figindex/data/analysis/targets.csv
-[할 일] targets.csv의 종목 목록으로 엔티티 사전(entity_name,entity_type,aliases,ticker) 초안을 만들어 줘.
-별칭(aliases)은 확실한 것만 넣고, 모르는 칸은 비워 둬.
-[건드려도 되는 파일] figindex/data/entity_dictionary.csv
-```
-
-### 팀원 D (백엔드 API)
-```
-[읽을 것] AGENTS.md, figindex/backend/AGENTS.md, figindex/shared/schemas.py(Batch, Document, ReviewLog)
-[할 일] 현재 main.py에 있는 API 목록을 표로 정리하고, 업로드 API(POST /api/batches)를 추가하려면
-어떤 순서로 무엇을 만들어야 하는지 단계별 계획만 세워 줘.
-[건드려도 되는 파일] 없음 (계획만)
-```
-
-### 팀원 E (화면)
-```
-[읽을 것] AGENTS.md, figindex/frontend/AGENTS.md, figindex/frontend/app/lib/types.ts
-[할 일] 현재 화면(page.tsx, elements/[id]/page.tsx, components/)의 구조를 그림처럼 설명해 줘.
-그리고 업로드·진행률 화면을 mock 데이터로 먼저 만들려면 어떤 파일을 새로 만들어야 하는지 제안해 줘.
-[건드려도 되는 파일] 없음 (설명·제안만)
-```
-
-### 오분류 점검
-코드 작업이 아니라 화면을 보고 기록하는 일입니다. 기준은 `docs/glossary.md` 2절, 기록은 팀 공유 시트에 합니다.
-AI는 애매한 카드가 TABLE/CHART/DIAGRAM 중 무엇인지 물어볼 때 씁니다. 이때 glossary 2절을 같이 붙여 넣습니다.
+오분류 점검은 `docs/roles/B_추출품질.md`의 1단계와 같은 일입니다. 기준은 `docs/glossary.md` 2절, 기록은 팀 공유 시트에 합니다.
 
 ---
 
