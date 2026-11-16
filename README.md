@@ -129,7 +129,6 @@ docker compose down
 │       ├── crops/                  # 추출된 도표/차트 PNG 이미지
 │       ├── qdrant/                 # Qdrant 영구 스토리지 볼륨
 │       └── model_cache/            # DocLayout-YOLO 등 모델 가중치 캐시
-├── app/                            # (참고용) 로컬 파이썬 모듈
 ├── docs/                           # 📄 기획 및 아키텍처 문서
 │   └── FigIndex_통합_기획_설계서.md  # v0.4 통합 마스터 기획·설계서
 ├── scripts/                        # 유틸리티 스크립트
