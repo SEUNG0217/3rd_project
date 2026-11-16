@@ -130,6 +130,17 @@ METRIC_ALIASES: Dict[str, List[str]] = {
     "부채비율": ["부채비율", "부채/자본"],
 }
 
+# 지표별 단위 성격. 원화 환산은 AMOUNT만 한다 (EPS·BPS는 원이지만 주당 값이라 환산하지 않음).
+METRIC_UNIT_GROUP: Dict[str, str] = {
+    "매출액": "AMOUNT", "영업이익": "AMOUNT", "세전이익": "AMOUNT", "당기순이익": "AMOUNT",
+    "지배주주순이익": "AMOUNT", "매출총이익": "AMOUNT", "매출원가": "AMOUNT", "EBITDA": "AMOUNT",
+    "영업이익률": "PERCENT", "순이익률": "PERCENT", "ROE": "PERCENT", "ROA": "PERCENT",
+    "배당수익률": "PERCENT", "부채비율": "PERCENT",
+    "PER": "MULTIPLE", "PBR": "MULTIPLE", "EV/EBITDA": "MULTIPLE",
+    "EPS": "PER_SHARE", "BPS": "PER_SHARE",
+}
+_GROUP_DEFAULT_UNIT = {"PERCENT": "%", "MULTIPLE": "배", "PER_SHARE": "원"}
+
 _ALIAS_INDEX: Dict[str, str] = {
     alias.lower(): metric for metric, aliases in METRIC_ALIASES.items() for alias in aliases
 }
@@ -236,6 +247,41 @@ def normalize_unit(unit: Optional[str]) -> Optional[str]:
     if text.lower() in ("x",):
         return "배"
     return text
+
+
+def extract_krw_unit(text: Optional[str]) -> Optional[str]:
+    """"십억원 (단위별 상이)", "(십억원)", "십억 원" 같은 글에서 원화 단위를 찾는다."""
+    if not text:
+        return None
+    compact = str(text).replace(" ", "")
+    for unit in sorted(KRW_SCALE, key=len, reverse=True):
+        if unit in compact:
+            return unit
+    return None
+
+
+def resolve_unit(
+    metric_name: str,
+    row_label: str,
+    explicit_row_unit: Optional[str],
+    explicit_column_unit: Optional[str],
+    table_unit: Optional[str],
+    header_label: Optional[str] = None,
+) -> Optional[str]:
+    """셀 단위를 정한다. 우선순위:
+    unit_by_row → 행 라벨 괄호 단위 → unit_by_column → 지표 성격 기본값(%·배·원) → 표 단위·첫 열 머리글의 원화 단위
+    """
+    if explicit_row_unit:
+        return normalize_unit(explicit_row_unit)
+    _, hint = clean_row_label(row_label)
+    if hint:
+        return normalize_unit(hint)
+    if explicit_column_unit:
+        return normalize_unit(explicit_column_unit)
+    group = METRIC_UNIT_GROUP.get(metric_name)
+    if group in _GROUP_DEFAULT_UNIT:
+        return _GROUP_DEFAULT_UNIT[group]
+    return extract_krw_unit(table_unit) or extract_krw_unit(header_label) or normalize_unit(table_unit)
 
 
 def convert_krw(value: object, from_unit: Optional[str], to_unit: str) -> Optional[float]:

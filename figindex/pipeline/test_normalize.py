@@ -196,3 +196,28 @@ def test_parse_number(raw, expected):
 
 def test_convert_krw_reads_string_numbers():
     assert convert_krw("5,470", "억원", "십억원") == pytest.approx(547.0)
+
+
+from shared.normalize import extract_krw_unit, resolve_unit  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "text, unit",
+    [("십억원 (단위별 상이)", "십억원"), ("(십억원)", "십억원"), ("억 원", "억원"), ("십억원 (비율은 %)", "십억원"),
+     ("%", None), (None, None)],
+)
+def test_extract_krw_unit(text, unit):
+    assert extract_krw_unit(text) == unit
+
+
+def test_resolve_unit_priority():
+    # unit_by_row가 가장 우선
+    assert resolve_unit("영업이익", "영업이익", "억원", "십억원", "십억원") == "억원"
+    # 행 라벨 괄호 단위가 표 단위보다 우선
+    assert resolve_unit("EPS", "EPS (원)", None, None, "십억원 (단위별 상이)") == "원"
+    # 지표 성격 기본값이 표 단위보다 우선
+    assert resolve_unit("ROE", "ROE", None, None, "십억원") == "%"
+    assert resolve_unit("PER", "PER", None, None, "십억원") == "배"
+    # 금액 지표는 표 단위나 첫 열 머리글에서 원화 단위를 찾는다
+    assert resolve_unit("매출액", "매출액", None, None, "십억원 (단위별 상이)") == "십억원"
+    assert resolve_unit("매출액", "매출액", None, None, None, "(십억원)") == "십억원"

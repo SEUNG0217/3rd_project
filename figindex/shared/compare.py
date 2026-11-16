@@ -8,7 +8,8 @@ Qdrant 조회는 백엔드가 하고, 이 모듈은 받은 payload(dict) 목록�
 - TABLE 요소의 table_data만 본다. 숫자로 읽을 수 없는 셀은 건너뛴다 ("5,470" 같은 문자열 숫자는 읽는다).
 - 행 라벨은 normalize_metric, 열 이름은 normalize_period로 해석한다.
 - 같은 문서·같은 기간 값이 여러 개면 앞 페이지 값을 쓴다 (요약 표가 보통 앞에 있음).
-- 원화 금액이면 가장 많이 쓰인 원화 단위(또는 지정 단위)로 환산한다. 원문 값은 raw_*에 남긴다.
+- 셀 단위는 normalize.resolve_unit으로 정한다 (행 라벨 단위·지표 성격 우선, 표 전체 단위는 마지막).
+- 금액 지표(METRIC_UNIT_GROUP == AMOUNT)만 가장 많이 쓰인 원화 단위(또는 지정 단위)로 환산한다. 원문 값은 raw_*에 남긴다.
 """
 from __future__ import annotations
 
@@ -17,12 +18,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from shared.normalize import (
     KRW_SCALE,
-    clean_row_label,
+    METRIC_UNIT_GROUP,
     convert_krw,
     normalize_metric,
     normalize_period,
     normalize_unit,
     parse_number,
+    resolve_unit,
 )
 from shared.schemas import ComparisonCell, ComparisonResult, ElementType, TableData
 
@@ -57,7 +59,6 @@ def _collect_cells(payload: Dict[str, Any], metric_name: str) -> List[Comparison
         label = row.get(first_column)
         if label is None or normalize_metric(str(label)) != metric_name:
             continue
-        _, unit_hint = clean_row_label(str(label))
         for column in table.columns[1:]:
             period = normalize_period(column)
             if period is None:
@@ -66,7 +67,15 @@ def _collect_cells(payload: Dict[str, Any], metric_name: str) -> List[Comparison
             number = parse_number(raw_value)
             if number is None:
                 continue
-            raw_unit = table.unit_for(str(label), column) or unit_hint
+            raw_unit = table.unit_for(str(label), column)
+            cell_unit = resolve_unit(
+                metric_name,
+                str(label),
+                table.unit_by_row.get(str(label)),
+                table.unit_by_column.get(column),
+                table.unit,
+                first_column,
+            )
             cells.append(
                 ComparisonCell(
                     element_id=payload["element_id"],
@@ -83,7 +92,7 @@ def _collect_cells(payload: Dict[str, Any], metric_name: str) -> List[Comparison
                     raw_value=raw_value,
                     raw_unit=raw_unit,
                     value=number,
-                    unit=normalize_unit(raw_unit),
+                    unit=cell_unit,
                 )
             )
     return cells
@@ -116,7 +125,8 @@ def build_comparison(
             seen.add(key)
             cells.append(cell)
 
-    krw_unit = _pick_krw_unit(cells, unit)
+    is_amount = METRIC_UNIT_GROUP.get(metric_name) == "AMOUNT"
+    krw_unit = _pick_krw_unit(cells, unit) if is_amount else None
     if krw_unit:
         for cell in cells:
             converted = convert_krw(cell.raw_value, cell.unit, krw_unit)

@@ -151,3 +151,37 @@ def test_string_numbers_are_read():
     values = {c.period_key: (c.raw_value, c.value) for c in result.cells}
     assert values == {"2025": ("5,470", 5470.0), "2026": ("△120", -120.0)}
     assert available_metrics([payload]) == {"영업이익": 1}
+
+
+# 실제 v2 데이터(LS증권 롯데쇼핑 리포트 1쪽 "Financial Data")와 같은 모양: 표 단위가 "십억원 (단위별 상이)" 하나뿐
+LS_REAL = _payload(
+    "fig-72221b254fe1", "doc-ls-real", "LS증권", 1,
+    {
+        "columns": ["(십억원)", "2024", "2025", "2026E"],
+        "rows": [
+            {"(십억원)": "영업이익", "2024": "473", "2025": "547", "2026E": "762"},
+            {"(십억원)": "EPS (원)", "2024": "-34,241", "2025": "1,824", "2026E": "8,665"},
+            {"(십억원)": "PER (x)", "2024": "-1.6", "2025": "39.8", "2026E": "16.2"},
+            {"(십억원)": "영업이익률 (%)", "2024": "3.4", "2025": "4.0", "2026E": "5.3"},
+        ],
+        "unit": "십억원 (단위별 상이)",
+        "unit_by_row": {},
+        "unit_by_column": {},
+    },
+)
+
+
+def test_mixed_unit_table_amount_uses_table_krw_unit():
+    result = build_comparison([LS_REAL], "롯데쇼핑", "영업이익", unit="억원")
+    assert result.unit == "억원"
+    cell = next(c for c in result.cells if c.period_key == "2025")
+    assert cell.value == pytest.approx(5470.0)
+    assert cell.raw_unit == "십억원 (단위별 상이)"
+
+
+@pytest.mark.parametrize("metric, unit", [("EPS", "원"), ("PER", "배"), ("영업이익률", "%")])
+def test_mixed_unit_table_non_amount_not_converted(metric, unit):
+    result = build_comparison([LS_REAL], "롯데쇼핑", metric, unit="억원")
+    assert result.unit is None
+    assert {c.unit for c in result.cells} == {unit}
+    assert all(c.value == pytest.approx(float(str(c.raw_value).replace(",", ""))) for c in result.cells)
