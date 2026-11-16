@@ -1,14 +1,16 @@
 """
 Generate a realistic sample financial research report PDF for FigIndex PoC testing.
-Output: data/sample_pdfs/20250115_SK하이닉스_삼성증권.pdf
+Output: figindex/data/sample_pdfs/20250115_SK하이닉스_삼성증권.pdf (--out 으로 폴더 변경 가능)
 """
+import argparse
 from pathlib import Path
 import fitz  # PyMuPDF
 
-from app.core.config import settings
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "figindex" / "data" / "sample_pdfs"
 
-def create_sample_report():
-    output_dir = settings.SAMPLE_PDFS_DIR
+
+def create_sample_report(output_dir: Path = DEFAULT_OUTPUT_DIR):
     output_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = output_dir / "20250115_SK하이닉스_삼성증권.pdf"
 
@@ -95,5 +97,8 @@ def create_sample_report():
     return pdf_path
 
 if __name__ == "__main__":
-    create_sample_report()
+    parser = argparse.ArgumentParser(description="FigIndex 테스트용 샘플 리포트 PDF 생성")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT_DIR, help="PDF를 저장할 폴더")
+    args = parser.parse_args()
+    create_sample_report(args.out)
 
