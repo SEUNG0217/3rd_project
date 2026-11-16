@@ -1,7 +1,7 @@
 # 백엔드 폴더 규칙 (figindex/backend/)
 
 루트 `AGENTS.md`의 규칙이 먼저 적용되고, 이 폴더에서 작업할 때는 아래를 추가로 따른다.
-담당: 팀원 D(API), 팀원 C(검색), 팀장.
+담당: 팀원 1(업로드·검수 API), 팀원 2(검색), 팀장.
 
 ## 1. API 모양
 - 요청·응답 모델은 `shared/schemas.py`의 모델(`ElementSearchPayload`, `TableData`, `Document`, `Batch`, `ReviewLog` 등)을 쓴다. 같은 모양의 모델을 이 폴더에 새로 만들지 않는다.

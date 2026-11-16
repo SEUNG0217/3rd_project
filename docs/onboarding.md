@@ -107,7 +107,7 @@ GitHub에서 `main`으로 Pull Request를 만들고, 본문에 AI 보고 내용�
 `docs/roles/` 폴더에 역할별 브리핑이 있습니다. 혼자 읽지 말고 **AI에게 읽혀서 설명을 듣는 방식**으로 시작합니다.
 첫 메시지는 `docs/roles/README.md`의 "시작하는 법"을 복사해서 보내면 됩니다.
 
-오분류 점검은 `docs/roles/B_추출품질.md`의 1단계와 같은 일입니다. 기준은 `docs/glossary.md` 2절, 기록은 팀 공유 시트에 합니다.
+오분류 점검은 `docs/roles/3_정답셋.md`의 2단계입니다. 기준은 `docs/glossary.md` 2절, 기록은 팀 공유 시트에 합니다.
 
 ---
 
