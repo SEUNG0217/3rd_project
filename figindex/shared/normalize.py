@@ -6,21 +6,27 @@
 - 저장된 데이터는 바꾸지 않는다. 비교 시점에만 계산한다.
 - 근거 데이터: figindex/data/analysis/period_labels.csv, row_labels.csv (2026-11-13 분석)
 
-반환 형식은 schemas.py에 모델이 정해지기 전까지 dict로 둔다.
-(schemas.py 추가 제안: PeriodBasis Enum, MetricEntry, ComparisonCell — PR 본문 참고)
+비교 결과 모델은 schemas.py의 ComparisonCell, ComparisonResult, 기간 성격은 PeriodBasis.
 """
 from __future__ import annotations
 
 import re
 from typing import Dict, List, Optional, Tuple
 
+from shared.schemas import PeriodBasis
+
 # ---------------------------------------------------------------------------
 # 1. 기간
 # ---------------------------------------------------------------------------
 # period_key 형식: "2026" (연간) / "2026Q3" (분기)
-# basis: "A" 실적, "E" 추정(E·F 통합), "P" 잠정, None 표기 없음(실적/추정 판단하지 않음)
+# period_basis: 원문 접미사 A/E/F/P → PeriodBasis. 접미사가 없으면 None (실적/추정 판단하지 않음)
 
-_BASIS_MAP = {"A": "A", "E": "E", "F": "E", "P": "P"}
+_BASIS_MAP = {
+    "A": PeriodBasis.ACTUAL,
+    "E": PeriodBasis.ESTIMATE,
+    "F": PeriodBasis.ESTIMATE,
+    "P": PeriodBasis.PRELIM,
+}
 
 # 기간과 함께 붙으면 "그 기간의 값"이 아닌 열 (수정 전후, 증감률, 컨센서스 등) → 비교 대상에서 뺀다
 _QUALIFIER_TOKENS = (
@@ -53,8 +59,8 @@ _PERIOD_PATTERNS: List[re.Pattern] = [
 def normalize_period(label: str) -> Optional[Dict[str, object]]:
     """열 이름을 기간으로 해석한다. 기간이 아니거나 수식어가 붙은 열이면 None.
 
-    >>> normalize_period("3Q26P")
-    {'period_key': '2026Q3', 'year': 2026, 'quarter': 3, 'basis': 'P', 'raw': '3Q26P'}
+    >>> normalize_period("3Q26P")["period_key"]
+    '2026Q3'
     """
     if label is None:
         return None
@@ -82,9 +88,15 @@ def normalize_period(label: str) -> Optional[Dict[str, object]]:
         quarter_text = groups.get("q") or groups.get("q2") or groups.get("q3") or groups.get("q4")
         quarter = int(quarter_text) if quarter_text else None
         basis_char = groups.get("basis") or groups.get("basis_y")
-        basis = _BASIS_MAP.get(basis_char.upper()) if basis_char else None
+        period_basis = _BASIS_MAP.get(basis_char.upper()) if basis_char else None
         period_key = f"{year}Q{quarter}" if quarter else f"{year}"
-        return {"period_key": period_key, "year": year, "quarter": quarter, "basis": basis, "raw": raw}
+        return {
+            "period_key": period_key,
+            "year": year,
+            "quarter": quarter,
+            "period_basis": period_basis,
+            "raw": raw,
+        }
     return None
 
 

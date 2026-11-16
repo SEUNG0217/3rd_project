@@ -188,3 +188,22 @@ IoU = 두 박스가 겹친 넓이 ÷ 두 박스를 합친 넓이. 평가 코드�
 - Enum 값: **영어 대문자** (`APPROVED`). 단, `LayoutClass`는 모델 출력 그대로
 - 한글은 화면 문구와 주석에만
 - ID는 모두 UUIDv4 문자열, 이름은 `{대상}_id`
+
+## 14. 문서 간 비교 (`ComparisonCell`, `ComparisonResult`)
+
+같은 대상(`extra_metadata.target`)의 여러 문서 표에서 **같은 지표 × 같은 기간** 값을 모은 것입니다. 저장된 데이터는 바꾸지 않고 조회할 때 계산합니다. 코드: `figindex/shared/normalize.py`, `figindex/shared/compare.py`, API `GET /api/compare`, `GET /api/compare/metrics`.
+
+| 한글 용어 | 코드명 | 정의 |
+| --- | --- | --- |
+| 지표 | `metric_name` | 행 라벨을 묶은 대표 이름. 목록은 `normalize.py`의 `METRIC_ALIASES` (예: `순매출액` → `매출액`) |
+| 기간 키 | `period_key` | 열 이름을 정규화한 기간. 연간 `2026`, 분기 `2026Q3` |
+| 기간 성격 | `period_basis` (`PeriodBasis`) | 원문 접미사로만 판단: `ACTUAL`(A), `ESTIMATE`(E·F), `PRELIM`(P). 접미사가 없으면 `None` |
+| 원문 값 | `raw_row_label`, `raw_column`, `raw_value`, `raw_unit` | 표에 적힌 그대로. 화면에 항상 함께 보여 줌 |
+| 비교 값 | `value`, `unit` | 원화 금액만 한 단위로 환산한 값. 비율(%)·배수(배)는 그대로 |
+
+**규칙**
+- 수식어가 붙은 열(`수정전`, `변경률`, `yoy`, `컨센서스`, `차이` 등)은 같은 기간이어도 비교하지 않습니다.
+- 의미가 다른 지표는 묶지 않습니다: `당기순이익` ≠ `지배주주순이익`, `매출액` ≠ `총매출액`.
+- 같은 문서에 같은 지표·기간 값이 여러 개면 앞 페이지 값을 씁니다.
+- 원화 환산 단위: `원`, `천원`, `백만원`, `억원`, `십억원`, `조원`. 지정하지 않으면 가장 많이 쓰인 단위로 맞춥니다.
+- 이름이 같은 지표도 계산 기준이 다를 수 있습니다(예: 영업이익률의 분모가 총매출액인지 순매출액인지). 값이 크게 다르면 `raw_row_label`과 원문 페이지로 확인합니다.

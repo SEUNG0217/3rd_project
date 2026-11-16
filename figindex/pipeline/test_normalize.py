@@ -15,6 +15,7 @@ FIGINDEX_DIR = REPO_ROOT / "figindex"
 if str(FIGINDEX_DIR) not in sys.path:
     sys.path.insert(0, str(FIGINDEX_DIR))
 
+from shared.schemas import PeriodBasis  # noqa: E402
 from shared.normalize import (  # noqa: E402
     clean_row_label,
     convert_krw,
@@ -28,31 +29,31 @@ from shared.normalize import (  # noqa: E402
 # 기간
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "raw, period_key, basis",
+    "raw, period_key, period_basis",
     [
         # 연간
         ("2025", "2025", None),
-        ("2026E", "2026", "E"),
-        ("2026F", "2026", "E"),
-        ("2025A", "2025", "A"),
-        ("2026P", "2026", "P"),
+        ("2026E", "2026", PeriodBasis.ESTIMATE),
+        ("2026F", "2026", PeriodBasis.ESTIMATE),
+        ("2025A", "2025", PeriodBasis.ACTUAL),
+        ("2026P", "2026", PeriodBasis.PRELIM),
         ("2024년", "2024", None),
-        ("26E", "2026", "E"),
-        ("27F", "2027", "E"),
+        ("26E", "2026", PeriodBasis.ESTIMATE),
+        ("27F", "2027", PeriodBasis.ESTIMATE),
         ("25", "2025", None),
-        ("'26E", "2026", "E"),
+        ("'26E", "2026", PeriodBasis.ESTIMATE),
         ("’22", "2022", None),
         ("FY25", "2025", None),
-        ("FY2026E", "2026", "E"),
-        ("2026E_Annual", "2026", "E"),
+        ("FY2026E", "2026", PeriodBasis.ESTIMATE),
+        ("2026E_Annual", "2026", PeriodBasis.ESTIMATE),
         ("2025*_Annual", "2025", None),
         # 분기
         ("3Q25", "2025Q3", None),
-        ("3Q26P", "2026Q3", "P"),
-        ("4Q26E", "2026Q4", "E"),
-        ("4Q26F", "2026Q4", "E"),
-        ("1Q25A", "2025Q1", "A"),
-        ("3Q.26P", "2026Q3", "P"),
+        ("3Q26P", "2026Q3", PeriodBasis.PRELIM),
+        ("4Q26E", "2026Q4", PeriodBasis.ESTIMATE),
+        ("4Q26F", "2026Q4", PeriodBasis.ESTIMATE),
+        ("1Q25A", "2025Q1", PeriodBasis.ACTUAL),
+        ("3Q.26P", "2026Q3", PeriodBasis.PRELIM),
         ("1Q.25", "2025Q1", None),
         ("3Q 25", "2025Q3", None),
         ("3Q2025", "2025Q3", None),
@@ -60,17 +61,17 @@ from shared.normalize import (  # noqa: E402
         ("25.3Q", "2025Q3", None),
         ("25Q3", "2025Q3", None),
         ("2025 1Q", "2025Q1", None),
-        ("2026F 2Q", "2026Q2", "E"),
+        ("2026F 2Q", "2026Q2", PeriodBasis.ESTIMATE),
         ("2025_1Q*", "2025Q1", None),
-        ("2026_3QP", "2026Q3", "P"),
-        ("2026_4QE", "2026Q4", "E"),
+        ("2026_3QP", "2026Q3", PeriodBasis.PRELIM),
+        ("2026_4QE", "2026Q4", PeriodBasis.ESTIMATE),
     ],
 )
-def test_normalize_period_parses(raw, period_key, basis):
+def test_normalize_period_parses(raw, period_key, period_basis):
     result = normalize_period(raw)
     assert result is not None, raw
     assert result["period_key"] == period_key
-    assert result["basis"] == basis
+    assert result["period_basis"] == period_basis
     assert result["raw"] == raw
 
 
